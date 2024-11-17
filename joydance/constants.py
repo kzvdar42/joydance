@@ -35,6 +35,9 @@ class Command(Enum):
     LEFT = 3652315484
     ACCEPT = 1084313942
 
+    V1_KEYBOARD_ERROR_OK = 185785632
+    V1_FAVORITE = 2424896653
+
     PAUSE = 'PAUSE'
 
     BACK = 'SHORTCUT_BACK'
@@ -61,6 +64,9 @@ class Command(Enum):
 
     TIPS_NEXT = 'SHORTCUT_TIPS_NEXT'
     TIPS_PREVIOUS = 'SHORTCUT_TIPS_PREVIOUS'
+
+    SHORTCUT_SEARCH = 'SHORTCUT_SEARCH'
+    SHORTCUT_EXTRA = 'SHORTCUT_EXTRA'
 
 
 class JoyConButton(Enum):
@@ -103,12 +109,15 @@ SHORTCUT_MAPPING = {
         Command.SORTING,
         Command.SWAP_GENDER,
         Command.TOGGLE_COOP,
+        Command.SHORTCUT_EXTRA,
+        Command.V1_FAVORITE,
     ],
     JoyConButton.Y: [
         Command.ACTIVATE_DANCERCARD,
         Command.CHANGE_DANCERCARD,
         Command.SWEAT_ACTIVATION,
         Command.UPLAY,
+        Command.SHORTCUT_SEARCH,
     ],
     JoyConButton.PLUS: [
         Command.DONT_SHOW_ANYMORE,
