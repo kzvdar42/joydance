@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 import json
 import random
 import socket
@@ -79,6 +80,15 @@ class JoyDance:
         }
 
         self.console_conn = None
+        self.v1_row_num = 0
+        self.v1_col_num_per_row_id = defaultdict(int)
+        self.v1_num_columns_per_row_id = {}
+        self.v1_coach_id = 0
+        self.v1_num_coaches = 0
+        self.v1_action_id = 0
+        self.is_in_lobby = False
+        self.is_on_recap = False
+        self.is_keyboard_opened = False
 
     def get_random_port(self):
         ''' Randomize a port number, to be used in hole_punching() later '''
@@ -220,6 +230,9 @@ class JoyDance:
             self.available_shortcuts = set()
             if message.get('setupData', {}).get('gameplaySetup', {}).get('pauseSlider', {}):
                 self.available_shortcuts.add(Command.PAUSE)
+
+            if self.protocol_version == WsSubprotocolVersion.V1:
+                await self.parse_phone_setup_data(message)
 
             if message['isPopup'] == 1:
                 self.is_input_allowed = True
@@ -481,3 +494,48 @@ class JoyDance:
         except Exception:
             await self.disconnect()
             traceback.print_exc()
+
+    async def parse_phone_setup_data(self, data):
+        """
+        Parse the phone setup data and update the state accordingly.
+        Only needed for protocol v1, as it needs to know the current setup of input carousel.
+        """
+        # Reset the state
+        self.is_on_recap = False
+        self.is_in_lobby = False
+        # Extract the main carousel structure
+        man_carousel_rows = data.get('setupData', {}).get('mainCarousel', {}).get('rows', [])
+        if man_carousel_rows:
+            # Extract the main carousel rows
+            num_columns_per_row_id = {}
+            for row_num, row in enumerate(man_carousel_rows):
+                num_columns_per_row_id[row_num] = len(row['items'])
+            self.v1_num_columns_per_row_id = num_columns_per_row_id
+        # Check if the game is on pop up screen
+        carousel_pop_setup = data.get('inputSetup', {}).get('carouselPosSetup', {})
+        if carousel_pop_setup:
+            self.v1_row_num = carousel_pop_setup['rowIndex']
+            self.v1_col_num_per_row_id[self.v1_row_num] = carousel_pop_setup['itemIndex']
+            self.v1_action_id = carousel_pop_setup['actionIndex']
+            self.v1_coach_id = 0
+        # Check if the game is in lobby screen, and extract the number of coaches
+        coaches = data.get('setupData', {}).get('lobbySetup', {}).get('coaches', [])
+        if coaches:
+            self.is_in_lobby = True
+            self.v1_num_coaches = len(coaches)
+        # Check if the game is on recap screen
+        if data.get('setupData', {}).get('recapSetup', {}):
+            self.is_on_recap = True
+        # Extract available shortcuts
+        shortcuts = data.get('setupData', {}).get('shortcuts', [])
+        if shortcuts:
+            shortcuts_identifiers = set()
+            for shortcut in data['setupData']['shortcuts']:
+                try:
+                    shortcuts_identifiers.add(Command(json.loads(shortcut['command'])['root']['identifier']))
+                except Exception:
+                    try:
+                        shortcuts_identifiers.add(Command(json.loads(shortcut['command'])['root']['input']))
+                    except Exception:
+                        print('Error adding shortcut', shortcut)
+            self.available_shortcuts = shortcuts_identifiers
