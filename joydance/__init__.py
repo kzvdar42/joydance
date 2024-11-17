@@ -314,11 +314,25 @@ class JoyDance:
             self.number_of_accels_sent += accels_num
             tmp_accel_data = tmp_accel_data[accels_num:]
 
-    async def send_command(self):
-        ''' Capture Joycon's input and send to console. Only works on protocol v2 '''
-        if self.protocol_version == WsSubprotocolVersion.V1:
-            return
+    async def preprocess_command_for_v2(self, cmd):
+        data = {}
+        if cmd == Command.PAUSE:
+            __class = 'JD_Pause_PhoneCommandData'
+        elif type(cmd.value) == str:
+            __class = 'JD_Custom_PhoneCommandData'
+            data['identifier'] = cmd.value
+        else:
+            __class = 'JD_Input_PhoneCommandData'
+            data['input'] = cmd.value
+        return __class, data
 
+    async def preprocess_command(self, cmd):
+        if self.protocol_version == WsSubprotocolVersion.V2:
+            return await self.preprocess_command_for_v2(cmd)
+        return None, None
+
+    async def send_command(self):
+        ''' Capture Joycon's input and send to console.'''
         while True:
             if self.disconnected:
                 return
@@ -370,15 +384,10 @@ class JoyDance:
 
                 # Send command to server
                 if cmd:
-                    data = {}
-                    if cmd == Command.PAUSE:
-                        __class = 'JD_Pause_PhoneCommandData'
-                    elif type(cmd.value) == str:
-                        __class = 'JD_Custom_PhoneCommandData'
-                        data['identifier'] = cmd.value
-                    else:
-                        __class = 'JD_Input_PhoneCommandData'
-                        data['input'] = cmd.value
+                    __class, data = await self.preprocess_command(cmd)
+                    # if __class is None, it means the command is not allowed to be sent
+                    if __class is None:
+                        continue
 
                     # Only send input when it's allowed to, otherwise we might get a disconnection
                     if self.is_input_allowed:
@@ -390,7 +399,6 @@ class JoyDance:
 
     async def connect_ws(self):
         server_hostname = None
-
         if self.protocol_version == WsSubprotocolVersion.V1:
             ssl_context = None
         else:
