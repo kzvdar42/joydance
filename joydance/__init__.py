@@ -46,13 +46,16 @@ class JoyDance:
             accel_acquisition_freq_hz=ACCEL_ACQUISITION_FREQ_HZ,
             accel_acquisition_latency=ACCEL_ACQUISITION_LATENCY,
             accel_max_range=ACCEL_MAX_RANGE,
-            on_state_changed=None):
+            on_state_changed=None,
+            on_game_message=None):
         self.joycon = joycon
         self.joycon_is_left = joycon.is_left()
         self.protocol_version = protocol_version
 
         if on_state_changed:
             self.on_state_changed = on_state_changed
+        if on_game_message:
+            self.on_game_message = on_game_message
 
         self.pairing_code = pairing_code
         self.host_ip_addr = host_ip_addr
@@ -95,6 +98,9 @@ class JoyDance:
         return random.randrange(39000, 39999)
 
     async def on_state_changed(state):
+        pass
+
+    async def on_game_message(self, message):
         pass
 
     async def get_access_token(self):
@@ -226,8 +232,13 @@ class JoyDance:
                         print('Unknown Command: ', e)
             self.available_shortcuts = shortcuts
         elif __class == 'JD_OpenPhoneKeyboard_ConsoleCommandData':
-            await asyncio.sleep(1)
-            await self.send_message('JD_CancelKeyboard_PhoneCommandData')
+            self.is_keyboard_opened = True
+        elif __class == 'JD_CancelKeyboard_ConsoleCommandData':
+            self.is_keyboard_opened = False
+        elif __class == 'JD_TriggerTransition_ConsoleCommandData':
+            # after transition, keyboard is closed
+            # FIXME: this is not reliable, as sometimes keyboard error screen can trigger this
+            self.is_keyboard_opened = False
         elif __class == 'JD_PhoneUiSetupData':
             self.is_input_allowed = True
             self.available_shortcuts = set()
@@ -241,6 +252,8 @@ class JoyDance:
                 self.is_input_allowed = True
             else:
                 self.is_input_allowed = (message.get('inputSetup', {}).get('isEnabled', 0) == 1)
+
+        await self.on_game_message(message)
 
     async def send_hello(self):
         print('Pairing...')

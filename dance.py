@@ -26,6 +26,8 @@ class WsCommand(Enum):
     CONNECT_JOYCON = 'connect_joycon'
     DISCONNECT_JOYCON = 'disconnect_joycon'
     UPDATE_JOYCON_STATE = 'update_joycon_state'
+    SHOW_KEYBOARD = 'show_keyboard'
+    HIDE_KEYBOARD = 'hide_keyboard'
 
 
 class PairingMethod(Enum):
@@ -115,6 +117,13 @@ async def connect_joycon(app, ws, data):
         except Exception as e:
             print(e)
 
+    async def on_game_message(message):
+        __class = message.get('__class')
+        if __class == 'JD_OpenPhoneKeyboard_ConsoleCommandData':
+            await ws_send_response(ws, WsCommand.SHOW_KEYBOARD, {'serial': serial})
+        elif __class == 'JD_CancelKeyboard_ConsoleCommandData':
+            await ws_send_response(ws, WsCommand.HIDE_KEYBOARD, {'serial': serial})
+
     print(data)
 
     serial = data['joycon_serial']
@@ -165,6 +174,7 @@ async def connect_joycon(app, ws, data):
         host_ip_addr=host_ip_addr,
         console_ip_addr=console_ip_addr,
         on_state_changed=on_joydance_state_changed,
+        on_game_message=on_game_message,
     )
     app['joydance_connections'][serial] = joydance
 
