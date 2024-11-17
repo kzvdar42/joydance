@@ -342,8 +342,92 @@ class JoyDance:
             data['input'] = cmd.value
         return __class, data
 
+    async def preprocess_command_for_v1(self, cmd):
+        data = {}
+        if cmd == Command.PAUSE:
+            __class = 'JD_Pause_PhoneCommandData'
+        elif cmd == Command.BACK:
+            if self.is_keyboard_opened:
+                __class = 'JD_CancelKeyboard_PhoneCommandData'
+            else:
+                __class = 'JD_Custom_PhoneCommandData'
+                data['identifier'] = cmd.value
+        elif type(cmd.value) == str:
+            __class = 'JD_Custom_PhoneCommandData'
+            data['identifier'] = cmd.value
+        elif cmd == Command.V1_FAVORITE:
+            __class = 'JD_Input_PhoneCommandData'
+            data['input'] = cmd.value
+        elif cmd == Command.UP:
+            if self.is_in_lobby:
+                return None, None
+            __class = 'ChangeRow_PhoneCommandData'
+            if self.v1_row_num <= 0:
+                self.v1_row_num = len(self.v1_num_columns_per_row_id)
+                return None, None
+            self.v1_row_num -= 1
+            data['rowIndex'] = self.v1_row_num
+        elif cmd == Command.DOWN:
+            if self.is_in_lobby:
+                return None, None
+            __class = 'ChangeRow_PhoneCommandData'
+            if self.v1_row_num >= len(self.v1_num_columns_per_row_id) - 1:
+                self.v1_row_num = 0
+                return None, None
+            self.v1_row_num += 1
+            data['rowIndex'] = self.v1_row_num
+        elif cmd == Command.LEFT:
+            if not self.is_in_lobby:
+                __class = 'ChangeItem_PhoneCommandData'
+                data['rowIndex'] = self.v1_row_num
+                self.v1_col_num_per_row_id[self.v1_row_num] -= 1
+                if self.v1_col_num_per_row_id[self.v1_row_num] < 0:
+                    self.v1_col_num_per_row_id[self.v1_row_num] = self.v1_num_columns_per_row_id[self.v1_row_num] - 1
+                data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
+            else:
+                __class = 'JD_ChangeCoach_PhoneCommandData'
+                if self.v1_coach_id == 0:
+                    return None, None
+                elif self.v1_coach_id < 0:
+                    self.v1_coach_id = 0
+                    return None, None
+                self.v1_coach_id -= 1
+                data['coachId'] = self.v1_coach_id
+        elif cmd == Command.RIGHT:
+            if not self.is_in_lobby:
+                __class = 'ChangeItem_PhoneCommandData'
+                data['rowIndex'] = self.v1_row_num
+                self.v1_col_num_per_row_id[self.v1_row_num] += 1
+                if self.v1_col_num_per_row_id[self.v1_row_num] >= self.v1_num_columns_per_row_id[self.v1_row_num]:
+                    self.v1_col_num_per_row_id[self.v1_row_num] = 0
+                data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
+            else:
+                __class = 'JD_ChangeCoach_PhoneCommandData'
+                if self.v1_coach_id >= self.v1_num_coaches - 1:
+                    self.v1_coach_id = self.v1_num_coaches - 1
+                    return None, None
+                self.v1_coach_id += 1
+                data['coachId'] = self.v1_coach_id
+        elif cmd == Command.ACCEPT:
+            if self.is_in_lobby:
+                __class = 'JD_StartGame_PhoneCommandData'
+            elif self.is_on_recap:
+                __class = 'JD_Input_PhoneCommandData'
+                data['input'] = Command.ACCEPT.value
+            elif self.is_keyboard_opened:
+                __class = 'JD_Input_PhoneCommandData'
+                data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
+            else:
+                __class = 'ValidateAction_PhoneCommandData'
+                data['rowIndex'] = self.v1_row_num
+                data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
+                data['actionIndex'] = self.v1_action_id
+        return __class, data
+
     async def preprocess_command(self, cmd):
-        if self.protocol_version == WsSubprotocolVersion.V2:
+        if self.protocol_version == WsSubprotocolVersion.V1:
+            return await self.preprocess_command_for_v1(cmd)
+        else:
             return await self.preprocess_command_for_v2(cmd)
         return None, None
 
