@@ -204,6 +204,9 @@ class JoyDance:
         elif __class == 'InputSetup_ConsoleCommandData':
             if message.get('isEnabled', 0) == 1:
                 self.is_input_allowed = True
+
+            if self.protocol_version == WsSubprotocolVersion.V1:
+                await self.parse_carousel_position_setup_data(message)
         elif __class == 'EnableCarousel_ConsoleCommandData':
             if message.get('isEnabled', 0) == 1:
                 self.is_input_allowed = True
@@ -494,6 +497,22 @@ class JoyDance:
         except Exception:
             await self.disconnect()
             traceback.print_exc()
+
+    async def parse_carousel_position_setup_data(self, message):
+        """
+        Parse the carousel position setup data and update the state accordingly.
+        """
+        # carouselPosSetup can be in inputSetup or at the root level
+        carousel_pos_setup = None
+        if 'carouselPosSetup' in message:
+            carousel_pos_setup = message['carouselPosSetup']
+        elif 'inputSetup' in message:
+            carousel_pos_setup = message['inputSetup'].get('carouselPosSetup', {})
+
+        if carousel_pos_setup:
+            self.v1_row_num = carousel_pos_setup['rowIndex']
+            self.v1_col_num_per_row_id[self.v1_row_num] = carousel_pos_setup['itemIndex']
+            self.v1_action_id = carousel_pos_setup['actionIndex']
 
     async def parse_phone_setup_data(self, data):
         """
