@@ -192,13 +192,59 @@ class JoyDance:
         except Exception:
             await self.disconnect(close_ws=False)
 
+    async def handle_rumble_on_sound_index(self, sound_index):
+        """
+        Handle rumble based on the sound index.
+        """
+        if sound_index == 0:  # Coach selection
+            self.joycon.rumble(frequency=160.0, amplitude=0.3)
+            await asyncio.sleep(0.15)
+            self.joycon.stop_rumble()
+            
+        elif 1 <= sound_index <= 5:  # Stars (1-5)
+            # More stars = stronger/longer vibration
+            strength = 0.3 + (sound_index * 0.12)  # 0.42 to 0.90
+            duration = 0.1 + (sound_index * 0.05)  # 0.15 to 0.35
+            self.joycon.rumble(frequency=240.0, amplitude=strength)
+            await asyncio.sleep(duration)
+            self.joycon.stop_rumble()
+            
+        elif sound_index == 6:  # Megastar
+            # Celebratory pattern: three increasing pulses
+            for amp in [0.5, 0.7, 1.0]:
+                self.joycon.rumble(frequency=320.0, amplitude=amp)
+                await asyncio.sleep(0.15)
+                self.joycon.stop_rumble()
+                await asyncio.sleep(0.08)
+                
+        elif sound_index == 7:  # Star move
+            # Quick strong pulse to highlight special move
+            self.joycon.rumble(frequency=280.0, amplitude=0.8)
+            await asyncio.sleep(0.2)
+            self.joycon.stop_rumble()
+            
+        elif sound_index == 8:  # Start dance
+            # Distinct "get ready" double pulse
+            self.joycon.rumble(frequency=240.0, amplitude=0.6)
+            await asyncio.sleep(0.15)
+            self.joycon.stop_rumble()
+            await asyncio.sleep(0.1)
+            self.joycon.rumble(frequency=320.0, amplitude=0.8)
+            await asyncio.sleep(0.2)
+            self.joycon.stop_rumble()
+
     async def on_message(self, message):
         message = json.loads(message)
-        # print('<<<', message)
+        if message.get('__class') != 'JD_PhoneUiSetupData':
+            # don't print UI setup data
+            print('<<<', message)
 
         __class = message['__class']
         if __class == 'JD_PhoneDataCmdHandshakeContinue':
             await self.send_message('JD_PhoneDataCmdSync', {'phoneID': message['phoneID']})
+        elif __class == 'JD_PlaySound_ConsoleCommandData':
+            sound_index = message.get('soundIndex', 0)
+            await self.handle_rumble_on_sound_index(sound_index)
         elif __class == 'JD_PhoneDataCmdSyncEnd':
             await self.send_message('JD_PhoneDataCmdSyncEnd', {'phoneID': message['phoneID']})
             await self.on_state_changed(self.joycon.serial, PairingState.CONNECTED)
