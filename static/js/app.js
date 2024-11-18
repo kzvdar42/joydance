@@ -153,8 +153,8 @@ class PrivateIpAddress extends Component {
         const addr = pairing_method == PairingMethod.DEFAULT ? state.host_ip_addr : state.console_ip_addr
         return html`
             <label>
-                ${[PairingMethod.DEFAULT, PairingMethod.STADIA].indexOf(pairing_method) > -1 && html`Host's Private IP Address`}
-                ${[PairingMethod.DEFAULT, PairingMethod.STADIA].indexOf(pairing_method) == -1 && html`Console's Private IP Address`}
+                ${[PairingMethod.DEFAULT, PairingMethod.STADIA].indexOf(pairing_method) > -1 && html`Host Private IP`}
+                ${[PairingMethod.DEFAULT, PairingMethod.STADIA].indexOf(pairing_method) == -1 && html`Console Private IP`}
             </label>
 
             ${(pairing_method == PairingMethod.STADIA) && html`

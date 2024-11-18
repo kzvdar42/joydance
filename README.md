@@ -112,10 +112,10 @@ pip3 install -r requirements.txt
       | Pairing Code       | Require        |           | Require   |                       |
       | Private IP Address | Host           | Console   |           | PC/Console            |
 
-    - **Host's Private IP Address**:
+    - **Host Private IP**:
       - The private IP address of your PC/Mac/Linux running JoyDance. Find this in the Wi-Fi settings.
       - Starts with `192.168.` or `10.`.
-    - **PC/Console's Private IP Address**:
+    - **PC/Console Private IP**:
       - The private IP address of your PC/console. Find this in the Wi-Fi settings on PC/console.
       - Starts with `192.168.` or `10.`.
     - **Pairing Code**: get this from the game.

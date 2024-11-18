@@ -6,15 +6,20 @@ body {
 }
 
 .container {
-    border-radius: 10px;
+    container-type: inline-size;
+    container-name: container;
+    border-radius: 12px;
     background-color: #272629;
-    padding: 20px;
-    margin: 10px;
+    padding: 24px;
+    margin: 15px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .ascii {
     text-align: center;
-    padding: 8px 0;
+    padding: 8px 0 24px 0;
+    width: 100%;
+    overflow: hidden;
 }
 
 .ascii pre {
@@ -23,17 +28,26 @@ body {
     text-align: left;
     margin: 0;
     font-weight: bold;
-    font-size: 10px;
-    line-height: 10px;
+    font-size: calc(1.0cqi * 100 / 40);
+    line-height: 1;
     color: #FFF;
+    transform-origin: center;
+    transform: scale(var(--scale, 1));
+    white-space: pre;
 }
 
-.flex {
-    display: flex;
+/* For a 300px container, font size should be ~4.2px (300/71) */
+@container container (max-width: 200px) {
+    .ascii pre {
+        font-size: 5px;
+    }
 }
 
-.joycons {
-    margin-top: 10px;
+/* For a 500px container, font size should be ~7px (500/71) */
+@container container (min-width: 440px) {
+    .ascii pre {
+        font-size: 11px;
+    }
 }
 
 .joycons-wrapper button {
@@ -59,9 +73,14 @@ body {
 
 
 .joycons .joycons-wrapper .joycons-list li {
-    border-bottom: 1px solid #2f2f2f;
-    padding: 12px 0;
+    border-bottom: 1px solid #3f3f3f;
+    padding: 16px 0;
+    transition: background-color 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
+
 
 .joycons .joycons-wrapper .joycons-list .joycon-color {
     width: 35%;
@@ -95,15 +114,18 @@ body {
     margin: auto;
 }
 
-.joycons .btn-refresh {
-    color: #383000;
-    background-color: #e2c700;
-    margin: auto;
+input, select {
+    border-radius: 6px;
+    padding: 8px 12px;
+    border: 2px solid #3f3f3f !important;
+    background-color: #1c1b1f;
+    color: #e1e1e1;
+    transition: border-color 0.2s ease;
 }
 
-input, select {
-    box-shadow: none !important;
-    border-width: 2px !important;
+input:focus, select:focus {
+    border-color: #2196F3 !important;
+    outline: none;
 }
 
 input:invalid {
@@ -111,8 +133,9 @@ input:invalid {
 }
 
 input[readonly] {
-    background-color: #ccc !important;
-    color: #000;
+    background-color: #1c1b1f !important;
+    color: #757575;
+    border-color: #3f3f3f !important;
 }
 
 #ipAddr, #pairingCode, .joycons-list .pairing-code {
@@ -134,22 +157,98 @@ input[readonly] {
     color: #4d4d4d;
 }
 
-.pure-button-primary {
-    background-color: #1976D2 !important;
-    color: #E3F2FD !important;
+.pure-button {
+    border-radius: 6px;
+    padding: 4px 10px;
+    height: 32px;
+    line-height: 24px;
+    margin: 0;
 }
 
+.pure-button-primary {
+    background-color: #2196F3;
+    color: #FFF !important;
+    font-weight: 500;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    min-width: 70px;
+    width: auto;
+    height: 32px;
+    line-height: 24px;
+    display: inline-block;
+}
+
+
+.pure-button-primary:hover {
+    background-color: #1976D2 !important;
+}
+
+.joycons .btn-refresh {
+    background-color: #ffd700;
+    color: #000 !important;
+    font-weight: 500;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    min-width: 70px;
+    width: auto;
+    height: 32px;
+    line-height: 24px;
+    display: inline-block;
+}
+
+.joycons .btn-refresh:hover {
+    background-color: #ffed4a;
+}
+
+
 .pure-form fieldset {
-    padding-bottom: 0;
+    padding: 0;
+}
+
+.pure-form .pure-g {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+/* Full width elements */
+.pure-form .pure-g > div.pure-u-1 {
+    flex: 0 0 100%;
+    width: 100%;
+}
+
+/* Half width elements */
+.pure-form .pure-g > div.pure-u-1-2 {
+    flex: 0 0 calc(50% - 8px);
+    width: calc(50% - 8px);
+}
+
+/* Form control styling */
+.pure-form select,
+.pure-form input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Config title spacing */
+.pure-form h2 {
+    margin: 0 0 16px 0;
+    width: 100%;
 }
 
 .battery-level {
     display: inline-block;
-    margin-left: 8px;
+    margin-left: 12px;
+    opacity: 0.9;
 }
 
 .battery-level svg {
-    width: 16px;
+    width: 18px;
     margin: auto;
     vertical-align: middle;
 }
@@ -177,4 +276,86 @@ input[readonly] {
 .battery-level.critical .battery-bar-3,
 .battery-level.critical .battery-bar-4 {
     display: none;
+}
+
+.search-overlay {
+    padding: 0;
+    z-index: 1000;
+}
+
+.search-overlay form {
+    display: flex;
+    gap: 10px;
+    max-width: 600px;
+    margin: 0;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-overlay input {
+    flex: 1;
+}
+
+.search-overlay h3 {
+    margin: 0 0 10px 0;
+}
+
+select {
+    background-color: #1c1b1f !important;
+    color: #e1e1e1;
+}
+
+select option {
+    background-color: #1c1b1f;
+    color: #e1e1e1;
+}
+
+/* Adjust refresh button container and size */
+.joycons .pure-u-6-24 {
+    width: 15%;
+    height: 32px;
+}
+
+.joycons .pure-g {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+}
+
+.joycons h2 {
+    margin: 0;
+    line-height: 32px;
+    flex: 1;
+}
+
+.btn-refresh {
+    margin-top: 0;
+}
+
+/* Add spacing between form groups */
+.pure-form .pure-g > div {
+    margin-bottom: 16px;  /* Space between form elements */
+}
+
+/* Remove margin from last form group */
+.pure-form .pure-g > div:last-child {
+    margin-bottom: 0;
+}
+
+/* Adjust the grid layout for better spacing */
+.joycons-list .pure-g {
+    width: 100%;
+    align-items: center;
+}
+
+.joycons-list .pure-u-6-24 {
+    text-align: right;
+    padding-right: 4px;
+}
+
+.pure-u-2-24 {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
