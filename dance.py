@@ -323,7 +323,16 @@ async def websocket_handler(request):
                 continue
 
             try:
-                if cmd == WsCommand.GET_JOYCON_LIST:
+                if cmd == WsCommand.SEARCH_INPUT:
+                    text = data.get('text', '')
+                    # TODO: use main joycon?
+                    serial = next(iter(request.app['joydance_connections']))
+                    joydance = request.app['joydance_connections'][serial]
+                    if joydance.is_search_opened:
+                        await joydance.send_message('JD_SubmitKeyboard_PhoneCommandData', {
+                            'keyboardOutput': text
+                        })
+                elif cmd == WsCommand.GET_JOYCON_LIST:
                     joycon_list = await get_joycon_list(request.app)
                     await ws_send_response(ws, cmd, joycon_list)
                 elif cmd == WsCommand.CONNECT_JOYCON:
