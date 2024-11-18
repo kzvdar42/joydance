@@ -26,8 +26,9 @@ class WsCommand(Enum):
     CONNECT_JOYCON = 'connect_joycon'
     DISCONNECT_JOYCON = 'disconnect_joycon'
     UPDATE_JOYCON_STATE = 'update_joycon_state'
-    SHOW_KEYBOARD = 'show_keyboard'
-    HIDE_KEYBOARD = 'hide_keyboard'
+    SEARCH_INPUT = 'search_input'
+    SHOW_SEARCH = 'show_search'
+    HIDE_SEARCH = 'hide_search'
 
 
 class PairingMethod(Enum):
@@ -120,9 +121,9 @@ async def connect_joycon(app, ws, data):
     async def on_game_message(message):
         __class = message.get('__class')
         if __class == 'JD_OpenPhoneKeyboard_ConsoleCommandData':
-            await ws_send_response(ws, WsCommand.SHOW_KEYBOARD, {'serial': serial})
+            await ws_send_response(ws, WsCommand.SHOW_SEARCH, {'serial': serial})
         elif __class == 'JD_CancelKeyboard_ConsoleCommandData':
-            await ws_send_response(ws, WsCommand.HIDE_KEYBOARD, {'serial': serial})
+            await ws_send_response(ws, WsCommand.HIDE_SEARCH, {'serial': serial})
 
     print(data)
 

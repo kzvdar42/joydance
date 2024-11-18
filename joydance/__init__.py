@@ -91,7 +91,7 @@ class JoyDance:
         self.v1_action_id = 0
         self.is_in_lobby = False
         self.is_on_recap = False
-        self.is_keyboard_opened = False
+        self.is_search_opened = False
 
     def get_random_port(self):
         ''' Randomize a port number, to be used in hole_punching() later '''
@@ -232,13 +232,13 @@ class JoyDance:
                         print('Unknown Command: ', e)
             self.available_shortcuts = shortcuts
         elif __class == 'JD_OpenPhoneKeyboard_ConsoleCommandData':
-            self.is_keyboard_opened = True
+            self.is_search_opened = True
         elif __class == 'JD_CancelKeyboard_ConsoleCommandData':
-            self.is_keyboard_opened = False
+            self.is_search_opened = False
         elif __class == 'JD_TriggerTransition_ConsoleCommandData':
             # after transition, keyboard is closed
             # FIXME: this is not reliable, as sometimes keyboard error screen can trigger this
-            self.is_keyboard_opened = False
+            self.is_search_opened = False
         elif __class == 'JD_PhoneUiSetupData':
             self.is_input_allowed = True
             self.available_shortcuts = set()
@@ -360,7 +360,7 @@ class JoyDance:
         if cmd == Command.PAUSE:
             __class = 'JD_Pause_PhoneCommandData'
         elif cmd == Command.BACK:
-            if self.is_keyboard_opened:
+            if self.is_search_opened:
                 __class = 'JD_CancelKeyboard_PhoneCommandData'
             else:
                 __class = 'JD_Custom_PhoneCommandData'
@@ -427,7 +427,7 @@ class JoyDance:
             elif self.is_on_recap:
                 __class = 'JD_Input_PhoneCommandData'
                 data['input'] = Command.ACCEPT.value
-            elif self.is_keyboard_opened:
+            elif self.is_search_opened:
                 __class = 'JD_Input_PhoneCommandData'
                 data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
             else:

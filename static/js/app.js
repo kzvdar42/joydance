@@ -1,8 +1,9 @@
 import { h, Component, render } from '/js/preact.module.js';
 import htm from '/js/htm.module.js';
+import SearchInput from '/js/search_input.js';
 
 // Initialize htm with Preact
-const html = htm.bind(h);
+export const html = htm.bind(h);
 window.mitty = mitt()
 
 const SVG_BATTERY_LEVEL = html`<svg style="enable-background:new 0 0 16 16" viewBox="0 0 16 16" xml:space="preserve" xmlns="http://www.w3.org/2000/svg"><path d="M15 4H0v8h15V9h1V7h-1V4zm-1 3v4H1V5h13v2z"/><rect class="battery-bar-4" height="4" width="2" x="11" y="6"/><rect class="battery-bar-3" height="4" width="2" x="8" y="6"/><rect class="battery-bar-2" height="4" width="2" x="5" y="6"/><rect class="battery-bar-1" height="4" width="2" x="2" y="6"/></svg>`
@@ -22,11 +23,14 @@ const PairingMethod = {
     OLD: 'old',
 }
 
-const WsCommand = {
+export const WsCommand = {
     GET_JOYCON_LIST: 'get_joycon_list',
     CONNECT_JOYCON: 'connect_joycon',
     DISCONNECT_JOYCON: 'disconnect_joycon',
     UPDATE_JOYCON_STATE: 'update_joycon_state',
+    SEARCH_INPUT: 'search_input',
+    SHOW_SEARCH: 'show_search',
+    HIDE_SEARCH: 'hide_search',
 }
 
 const PairingState = {
@@ -356,10 +360,12 @@ class App extends Component {
         this.handleMethodChange = this.handleMethodChange.bind(this)
         this.handleAddrChange = this.handleAddrChange.bind(this)
         this.handleCodeChange = this.handleCodeChange.bind(this)
+        this.handleSearchInput = this.handleSearchInput.bind(this)
 
         window.mitty.on('req_' + WsCommand.GET_JOYCON_LIST, this.requestGetJoyconList)
         window.mitty.on('req_' + WsCommand.CONNECT_JOYCON, this.requestConnectJoycon)
         window.mitty.on('req_' + WsCommand.DISCONNECT_JOYCON, this.requestDisconnectJoycon)
+        window.mitty.on('req_' + WsCommand.SEARCH_INPUT, this.handleSearchInput)
         window.mitty.on('update_method', this.handleMethodChange)
         window.mitty.on('update_addr', this.handleAddrChange)
         window.mitty.on('update_code', this.handleCodeChange)
@@ -379,6 +385,10 @@ class App extends Component {
 
     requestGetJoyconList() {
         this.sendRequest(WsCommand.GET_JOYCON_LIST);
+    }
+
+    handleSearchInput(data) {
+        this.sendRequest(WsCommand.SEARCH_INPUT, data);
     }
 
     requestConnectJoycon(serial) {
@@ -426,7 +436,7 @@ class App extends Component {
 
         this.socket.onmessage = function(event) {
             const msg = JSON.parse(event.data)
-            console.log(msg)
+            console.log('Received WebSocket message:', msg)
             const cmd = msg['cmd']
             const shortCmd = msg['cmd'].slice(5)  // Remove "resp_" prefix
 
@@ -436,7 +446,14 @@ class App extends Component {
                         joycons: msg['data'],
                     })
                     break
-
+                case WsCommand.SHOW_SEARCH:
+                    console.log('SHOW_SEARCH', msg['data'])
+                    window.mitty.emit('show_search', msg['data'])
+                    break
+                case WsCommand.HIDE_SEARCH:
+                    console.log('HIDE_SEARCH', msg['data'])
+                    window.mitty.emit('hide_search', msg['data'])
+                    break
                 default:
                     window.mitty.emit(cmd, msg['data'])
             }
@@ -503,12 +520,18 @@ class App extends Component {
                             <div class="pure-u-1-2">
                                 <${PairingCode} pairing_method=${state.pairing_method} pairing_code=${state.pairing_code} />
                             </div>
+                            <div class="pure-u-1">
+                                <${SearchInput} />
+                            </div>
                         </div>
                     </fieldset>
                 </form>
 
                 <div class="pure-u-1 joycons">
-                    <${JoyCons} pairing_method=${state.pairing_method} joycons=${state.joycons} />
+                    <${JoyCons} 
+                        pairing_method=${state.pairing_method} 
+                        joycons=${state.joycons} 
+                    />
                 </div>
             </div>
             <div class="footer">
