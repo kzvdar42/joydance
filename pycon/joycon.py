@@ -1,6 +1,7 @@
 import time
 from threading import Thread
 from typing import Optional, Tuple
+import math
 
 import hid
 
@@ -34,6 +35,7 @@ class JoyCon:
         self.product_id = product_id
         self.serial = serial
         self.simple_mode = simple_mode  # TODO: It's for reporting mode 0x3f
+        self._rumble_data = self._RUMBLE_DATA
 
         # setup internal state
         self._input_hooks = []
@@ -79,7 +81,7 @@ class JoyCon:
         self._joycon_device.write(b''.join([
             command,
             self._packet_number.to_bytes(1, byteorder='little'),
-            self._RUMBLE_DATA,
+            self._rumble_data,
             subcommand,
             argument,
         ]))
@@ -445,6 +447,50 @@ class JoyCon:
 
     def disconnect_device(self):
         self._write_output_report(b'\x01', b'\x06', b'\x00')
+
+    def encode_rumble_data(self, frequency=320.0, amplitude=0.0):
+        """Encode rumble data for the JoyCon.
+        
+        Args:
+            frequency (float): Frequency in Hz (valid range: 40.875885-1252.572266)
+            amplitude (float): Amplitude from 0.0 to 1.0
+        """
+        # Clamp values to valid ranges
+        frequency = max(40.875885, min(1252.572266, frequency))
+        amplitude = max(0.0, min(1.0, amplitude))
+        
+        # Encode frequency
+        freq_encoded = int(round(math.log2(frequency/10.0)*32.0))
+        freq_data = bytes([
+            ((freq_encoded >> 8) & 0xFF) + 0x40, 
+            freq_encoded & 0xFF
+        ])
+        
+        # Encode amplitude
+        amp_encoded = int(round(amplitude * 100))
+        amp_data = bytes([
+            (amp_encoded << 1) & 0xFF,
+            0x40
+        ])
+        
+        # Combine data for both motors (HD and LRA)
+        return amp_data + freq_data + amp_data + freq_data
+
+    def rumble(self, frequency=320.0, amplitude=0.0):
+        """Send a rumble effect to the JoyCon.
+        
+        Args:
+            frequency (float): Frequency in Hz (40.875885-1252.572266)
+            amplitude (float): Amplitude from 0.0 to 1.0
+        """
+        self._rumble_data = self.encode_rumble_data(frequency, amplitude)
+        # Send a dummy subcommand to trigger the rumble
+        self._write_output_report(b'\x10', b'\x00', b'\x00')
+
+    def stop_rumble(self):
+        """Stop any active rumble effect"""
+        self._rumble_data = self._RUMBLE_DATA
+        self._write_output_report(b'\x10', b'\x00', b'\x00')
 
 
 if __name__ == '__main__':
