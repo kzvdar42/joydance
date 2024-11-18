@@ -313,25 +313,34 @@ async def websocket_handler(request):
 
     async for msg in ws:
         if msg.type == WSMsgType.TEXT:
-            msg = msg.json()
             try:
-                cmd = WsCommand(msg['cmd'])
-            except ValueError:
-                print('Invalid cmd:', msg['cmd'])
+                msg_data = msg.json()
+                cmd = WsCommand(msg_data['cmd'])
+                data = msg_data.get('data', {})
+            except (ValueError, KeyError) as e:
+                print(f'Invalid message: {e}')
+                print(f'Message content: {msg.data}')
                 continue
 
-            if cmd == WsCommand.GET_JOYCON_LIST:
-                joycon_list = await get_joycon_list(request.app)
-                await ws_send_response(ws, cmd, joycon_list)
-            elif cmd == WsCommand.CONNECT_JOYCON:
-                await connect_joycon(request.app, ws, msg['data'])
-                await ws_send_response(ws, cmd, {})
-            elif cmd == WsCommand.DISCONNECT_JOYCON:
-                await disconnect_joycon(request.app, ws, msg['data'])
-                await ws_send_response(ws, cmd, {})
+            try:
+                if cmd == WsCommand.GET_JOYCON_LIST:
+                    joycon_list = await get_joycon_list(request.app)
+                    await ws_send_response(ws, cmd, joycon_list)
+                elif cmd == WsCommand.CONNECT_JOYCON:
+                    await connect_joycon(request.app, ws, data)
+                    await ws_send_response(ws, cmd, {})
+                elif cmd == WsCommand.DISCONNECT_JOYCON:
+                    await disconnect_joycon(request.app, ws, data)
+                    await ws_send_response(ws, cmd, {})
+            except Exception as e:
+                print(f"Error handling command {cmd}: {e}")
+                # Send error response to client
+                await ws_send_response(ws, cmd, {
+                    'error': str(e),
+                    'status': 'error'
+                })
         elif msg.type == WSMsgType.ERROR:
-            print('ws connection closed with exception %s' %
-                  ws.exception())
+            print(f'ws connection closed with exception {ws.exception()}')
 
     return ws
 
