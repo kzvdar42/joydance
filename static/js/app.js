@@ -371,16 +371,18 @@ class App extends Component {
         window.mitty.on('update_code', this.handleCodeChange)
     }
 
-    sendRequest(cmd, data) {
-        if (!data) {
-            data = {}
+    sendRequest(cmd, data = {}) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket is not connected');
+            return;
         }
+        
         const msg = {
             cmd: cmd,
-            data: data,
-        }
-        console.log('send', msg)
-        this.socket.send(JSON.stringify(msg))
+            data: data
+        };
+        console.log('Sending WebSocket message:', msg);
+        this.socket.send(JSON.stringify(msg));
     }
 
     requestGetJoyconList() {
