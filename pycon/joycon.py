@@ -37,6 +37,8 @@ class JoyCon:
         self.simple_mode = simple_mode  # TODO: It's for reporting mode 0x3f
         self._rumble_data = self._RUMBLE_DATA
         self._rumble_enabled = True
+        self._should_run = True
+        self.reconnect_timeout = 1
 
         # setup internal state
         self._input_hooks = []
@@ -44,11 +46,14 @@ class JoyCon:
         self._packet_number = 0
         self.set_accel_calibration((0, 0, 0), (1, 1, 1))
 
+        self._connect()
+
+    def _connect(self):
+        """Handle the connection process"""
         # connect to joycon
-        self._joycon_device = self._open(vendor_id, product_id, serial=serial)
+        self._joycon_device = self._open(self.vendor_id, self.product_id, serial=self.serial)
         self._read_joycon_data()
         self._setup_sensors()
-
         # start talking with the joycon in a daemon thread
         Thread(target=self._update_input_report, daemon=True).start()
 
@@ -117,20 +122,38 @@ class JoyCon:
         return report[7:size + 7]
 
     def _update_input_report(self):  # daemon thread
-        try:
-            while self._joycon_device:
+        while self._should_run:
+            try:
+                if not self._joycon_device:
+                    self._attempt_reconnect()
+                    continue
+
                 report = [0]
                 # TODO, handle input reports of type 0x21 and 0x3f
-                while report[0] != 0x30:
+                while report[0] != 0x30 and self._should_run:
                     report = self._read_input_report()
 
                 self._input_report = report
 
                 # Call input hooks in a different thread
                 Thread(target=self._input_hook_caller, daemon=True).start()
-        except OSError:
-            print('connection closed')
-            pass
+            except OSError:
+                print(f'connection lost to {self.serial}')
+                self._joycon_device = None
+                time.sleep(self.reconnect_timeout)  # Wait before attempting reconnection
+            except Exception as e:
+                print(f'Error in input report thread for {self.serial}: {e}')
+                time.sleep(2)
+
+    def _attempt_reconnect(self):
+        """Attempt to reconnect to the JoyCon"""
+        try:
+            print(f'attempting to reconnect to {self.serial}...')
+            self._connect()
+            print(f'reconnected successfully to {self.serial}')
+        except Exception as e:
+            print(f'reconnection failed to {self.serial}: {e}')
+            time.sleep(self.reconnect_timeout)  # Wait before next attempt
 
     def _input_hook_caller(self):
         for callback in self._input_hooks:
@@ -214,6 +237,7 @@ class JoyCon:
         return (byte >> offset_bit) & ((1 << nbit) - 1)
 
     def __del__(self):
+        self._should_run = False
         self._close()
 
     def set_accel_calibration(self, offset_xyz=None, coeff_xyz=None):
@@ -447,7 +471,10 @@ class JoyCon:
         }
 
     def disconnect_device(self):
+        """Safely disconnect the device"""
+        self._should_run = False
         self._write_output_report(b'\x01', b'\x06', b'\x00')
+        self._close()
 
     def encode_rumble_data(self, frequency=320.0, amplitude=0.0):
         """Encode rumble data for the JoyCon.

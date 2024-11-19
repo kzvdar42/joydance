@@ -93,6 +93,9 @@ class JoyDance:
         self.is_on_recap = False
         self.is_search_opened = False
 
+        self.reconnection_task = None
+        self.should_reconnect = True  # Flag to control reconnection attempts
+
     def get_random_port(self):
         ''' Randomize a port number, to be used in hole_punching() later '''
         return random.randrange(39000, 39999)
@@ -616,9 +619,49 @@ class JoyDance:
         print('disconnected')
         self.disconnected = True
         await self.on_state_changed(self.joycon.serial, {'state': PairingState.DISCONNECTED.value})
+        # Don't fully delete the joycon, just close it
+        self.joycon.close()
 
         if close_ws and self.ws:
             await self.ws.close()
+
+        # Start reconnection attempt if enabled
+        if self.should_reconnect and not self.reconnection_task:
+            self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
+
+    async def attempt_reconnect(self):
+        """Attempts to reconnect to the JoyCon periodically"""
+        retry_delay = 1  # Start with 1 second delay
+        max_delay = 30   # Maximum delay between attempts
+        
+        while self.should_reconnect:
+            try:
+                # Attempt to reconnect the joycon
+                await self.joycon.reconnect()
+                
+                if self.joycon.is_connected():
+                    print("JoyCon reconnected successfully")
+                    self.disconnected = False
+                    self.reconnection_task = None
+                    
+                    # Restart the main connection flow
+                    await self.on_state_changed(self.joycon.serial, {'state': PairingState.IDLE.value})
+                    asyncio.create_task(self.pair())
+                    return
+                
+            except Exception as e:
+                print(f"Reconnection attempt failed: {e}")
+                
+            # Exponential backoff with maximum delay
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, max_delay)
+
+    async def stop_reconnection(self):
+        """Stops the reconnection attempts"""
+        self.should_reconnect = False
+        if self.reconnection_task:
+            self.reconnection_task.cancel()
+            self.reconnection_task = None
 
     async def pair(self):
         try:
