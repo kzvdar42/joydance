@@ -192,6 +192,12 @@ class JoyDance:
         except Exception:
             await self.disconnect(close_ws=False)
 
+    async def set_rumble_enabled(self, enabled):
+        self.joycon.rumble_enabled = enabled
+        if enabled:
+            # Give a little buzz to indicate that rumble is enabled
+            await self.handle_rumble_on_sound_index(0)
+
     async def handle_rumble_on_sound_index(self, sound_index):
         """
         Handle rumble based on the sound index.

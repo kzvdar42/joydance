@@ -36,6 +36,7 @@ class JoyCon:
         self.serial = serial
         self.simple_mode = simple_mode  # TODO: It's for reporting mode 0x3f
         self._rumble_data = self._RUMBLE_DATA
+        self._rumble_enabled = True
 
         # setup internal state
         self._input_hooks = []
@@ -476,6 +477,16 @@ class JoyCon:
         # Combine data for both motors (HD and LRA)
         return amp_data + freq_data + amp_data + freq_data
 
+    @property
+    def rumble_enabled(self):
+        return self._rumble_enabled
+    
+    @rumble_enabled.setter
+    def rumble_enabled(self, enabled):
+        if not enabled:
+            self.stop_rumble()
+        self._rumble_enabled = enabled
+
     def rumble(self, frequency=320.0, amplitude=0.0):
         """Send a rumble effect to the JoyCon.
         
@@ -483,6 +494,9 @@ class JoyCon:
             frequency (float): Frequency in Hz (40.875885-1252.572266)
             amplitude (float): Amplitude from 0.0 to 1.0
         """
+        if not self.rumble_enabled:
+            return
+
         self._rumble_data = self.encode_rumble_data(frequency, amplitude)
         # Send a dummy subcommand to trigger the rumble
         self._write_output_report(b'\x10', b'\x00', b'\x00')

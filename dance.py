@@ -29,6 +29,7 @@ class WsCommand(Enum):
     SEARCH_INPUT = 'search_input'
     SHOW_SEARCH = 'show_search'
     HIDE_SEARCH = 'hide_search'
+    TOGGLE_RUMBLE = 'toggle_rumble'
 
 
 class PairingMethod(Enum):
@@ -100,6 +101,7 @@ async def get_joycon_list(app):
                 'is_left': joycon.is_left(),
                 'state': PairingState.IDLE.value,
                 'pairing_code': '',
+                'rumble_enabled': joycon.rumble_enabled,
             }
 
             app['joycons_info'][dev['serial']] = info
@@ -307,6 +309,14 @@ async def ws_send_response(ws, cmd, data):
     await ws.send_json(resp)
 
 
+async def toggle_rumble(app, ws, data):
+    serial = data['joycon_serial']
+    enabled = data['enabled']
+    if serial in app['joydance_connections']:
+        joydance = app['joydance_connections'][serial]
+        await joydance.set_rumble_enabled(enabled)
+
+
 async def websocket_handler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
@@ -341,6 +351,8 @@ async def websocket_handler(request):
                 elif cmd == WsCommand.DISCONNECT_JOYCON:
                     await disconnect_joycon(request.app, ws, data)
                     await ws_send_response(ws, cmd, {})
+                elif cmd == WsCommand.TOGGLE_RUMBLE:
+                    await toggle_rumble(request.app, ws, data)
             except Exception as e:
                 print(f"Error handling command {cmd}: {e}")
                 # Send error response to client
