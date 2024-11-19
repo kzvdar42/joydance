@@ -158,31 +158,33 @@ input[readonly] {
 }
 
 .pure-button {
+    font-weight: 500;
     border-radius: 6px;
-    padding: 4px 10px;
+    padding: 4px 8px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    min-width: 60px;
     height: 32px;
     line-height: 24px;
-    margin: 0;
+    white-space: nowrap;
 }
 
 .pure-button-primary {
     background-color: #2196F3;
     color: #FFF !important;
-    font-weight: 500;
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 13px;
-    transition: all 0.2s ease;
-    min-width: 70px;
-    width: auto;
-    height: 32px;
-    line-height: 24px;
-    display: inline-block;
 }
-
 
 .pure-button-primary:hover {
     background-color: #1976D2 !important;
+}
+
+.pure-button-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.pure-button-secondary:hover {
+    background-color: #7f8c8d;
 }
 
 .joycons .btn-refresh {
@@ -233,6 +235,12 @@ input[readonly] {
 .pure-form input {
     width: 100%;
     box-sizing: border-box;
+}
+
+@media only screen and (max-width: 480px) {
+    .pure-form button[type=submit] {
+        margin: unset !important;
+    }
 }
 
 /* Config title spacing */
@@ -312,8 +320,7 @@ select option {
 
 /* Adjust refresh button container and size */
 .joycons .pure-u-6-24 {
-    width: 15%;
-    height: 32px;
+    width: 90px;
 }
 
 .joycons .pure-g {
@@ -352,10 +359,42 @@ select option {
 .joycons-list .pure-u-6-24 {
     text-align: right;
     padding-right: 4px;
+    flex: 0 0 auto; /* Size to content */
 }
 
-.pure-u-2-24 {
+.joycons-list .pure-u-2-24 {
+    flex: 0 0 40px; /* Fixed width for joycon icon */
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+.button-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.joycons-list .pure-u-12-24 {
+    flex: 1; /* Allow info section to grow */
+    min-width: 150px;
+}
+
+.joycons-list .pure-u-4-24 {
+    flex: 0 0 auto; /* Size to content */
+}
+
+/* Make buttons more compact on small screens */
+@media (max-width: 450px) {
+    .button-group {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .joycons-list .pure-u-6-24 {
+        flex: 1 0 100%;
+        margin-top: 8px;
+    }
 }

@@ -31,6 +31,7 @@ export const WsCommand = {
     SEARCH_INPUT: 'search_input',
     SHOW_SEARCH: 'show_search',
     HIDE_SEARCH: 'hide_search',
+    TOGGLE_RUMBLE: 'toggle_rumble',
 }
 
 const PairingState = {
@@ -213,6 +214,7 @@ class JoyCon extends Component {
         this.connect = this.connect.bind(this)
         this.disconnect = this.disconnect.bind(this)
         this.onStateUpdated = this.onStateUpdated.bind(this)
+        this.toggleRumble = this.toggleRumble.bind(this)
 
         this.state = {
             ...props.joycon,
@@ -230,6 +232,14 @@ class JoyCon extends Component {
         window.mitty.emit('req_' + WsCommand.DISCONNECT_JOYCON, this.props.joycon.serial)
     }
 
+    toggleRumble() {
+        const newState = !this.state.rumble_enabled
+        window.mitty.emit('req_' + WsCommand.TOGGLE_RUMBLE, {
+            joycon_serial: this.props.joycon.serial,
+            enabled: newState
+        })
+    }
+
     onStateUpdated(data) {
         if (data['serial'] != this.props.joycon.serial) {
             return
@@ -243,7 +253,7 @@ class JoyCon extends Component {
         }
     }
 
-    render(props, { name, state, pairing_code, is_left, color, battery_level }) {
+    render(props, { name, state, pairing_code, is_left, color, battery_level, rumble_enabled }) {
         const joyconState = state
         const stateMessage = PairingStateMessage[joyconState]
         let showButton = true
@@ -279,7 +289,12 @@ class JoyCon extends Component {
                     </div>
                     <div class="pure-u-6-24">
                         ${showButton && joyconState == PairingState.CONNECTED && html`
-                            <button type="button" onClick=${this.disconnect} class="pure-button pure-button-error">Disconnect</button>
+                            <div class="button-group">
+                                <button type="button" onClick=${this.disconnect} class="pure-button pure-button-error">Disconnect</button>
+                                <button type="button" onClick=${this.toggleRumble} class="pure-button ${rumble_enabled ? 'pure-button-primary' : 'pure-button-secondary'}">
+                                    Rumble ${rumble_enabled ? 'On' : 'Off'}
+                                </button>
+                            </div>
                         `}
                         ${showButton && joyconState != PairingState.CONNECTED && html`
                             <button type="button" onClick=${this.connect} class="pure-button pure-button-primary">Connect</button>
@@ -361,11 +376,13 @@ class App extends Component {
         this.handleAddrChange = this.handleAddrChange.bind(this)
         this.handleCodeChange = this.handleCodeChange.bind(this)
         this.handleSearchInput = this.handleSearchInput.bind(this)
+        this.handleToggleRumble = this.handleToggleRumble.bind(this)
 
         window.mitty.on('req_' + WsCommand.GET_JOYCON_LIST, this.requestGetJoyconList)
         window.mitty.on('req_' + WsCommand.CONNECT_JOYCON, this.requestConnectJoycon)
         window.mitty.on('req_' + WsCommand.DISCONNECT_JOYCON, this.requestDisconnectJoycon)
         window.mitty.on('req_' + WsCommand.SEARCH_INPUT, this.handleSearchInput)
+        window.mitty.on('req_' + WsCommand.TOGGLE_RUMBLE, this.handleToggleRumble)
         window.mitty.on('update_method', this.handleMethodChange)
         window.mitty.on('update_addr', this.handleAddrChange)
         window.mitty.on('update_code', this.handleCodeChange)
@@ -391,6 +408,10 @@ class App extends Component {
 
     handleSearchInput(data) {
         this.sendRequest(WsCommand.SEARCH_INPUT, data);
+    }
+
+    handleToggleRumble(data) {
+        this.sendRequest(WsCommand.TOGGLE_RUMBLE, data);
     }
 
     requestConnectJoycon(serial) {
