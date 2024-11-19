@@ -715,6 +715,7 @@ class JoyDance:
         # Reset the state
         self.is_on_recap = False
         self.is_in_lobby = False
+        self.is_search_opened = False
         # Extract the main carousel structure
         man_carousel_rows = data.get('setupData', {}).get('mainCarousel', {}).get('rows', [])
         if man_carousel_rows:
