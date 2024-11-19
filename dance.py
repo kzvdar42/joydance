@@ -112,9 +112,9 @@ async def get_joycon_list(app):
 
 
 async def connect_joycon(app, ws, data):
-    async def on_joydance_state_changed(serial, state):
-        print(serial, state)
-        app['joycons_info'][serial]['state'] = state.value
+    async def on_joydance_state_changed(serial, update_dict):
+        print(serial, update_dict)
+        app['joycons_info'][serial].update(update_dict)
         try:
             await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app['joycons_info'][serial])
         except Exception as e:
@@ -188,16 +188,7 @@ async def disconnect_joycon(app, ws, data):
     print(data)
     serial = data['joycon_serial']
     joydance = app['joydance_connections'][serial]
-    app['joycons_info'][serial]['state'] = PairingState.IDLE.value
-
     await joydance.disconnect()
-    try:
-        await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, {
-            'joycon_serial': serial,
-            'state': PairingState.IDLE.value,
-        })
-    except Exception:
-        pass
 
 
 def parse_config():

@@ -116,7 +116,7 @@ class JoyDance:
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.post('https://public-ubiservices.ubi.com/v1/profiles/sessions', json={}, ssl=False) as resp:
                 if resp.status != 200:
-                    await self.on_state_changed(self.joycon.serial, PairingState.ERROR_CONNECTION)
+                    await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_CONNECTION.value})
                     raise Exception('ERROR: Couldn\'t get access token!')
 
                 # Add ticket to headers
@@ -130,7 +130,7 @@ class JoyDance:
         async with aiohttp.ClientSession(headers=self.headers) as session:
             async with session.get(url, params={'code': self.pairing_code}, ssl=False) as resp:
                 if resp.status != 200:
-                    await self.on_state_changed(self.joycon.serial, PairingState.ERROR_INVALID_PAIRING_CODE)
+                    await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_INVALID_PAIRING_CODE.value})
                     raise Exception('ERROR: Invalid pairing code!')
 
                 json_body = await resp.json()
@@ -157,7 +157,7 @@ class JoyDance:
             async with session.post(url, json=json_payload, ssl=False) as resp:
                 body = await resp.text()
                 if body != 'OK':
-                    await self.on_state_changed(self.joycon.serial, PairingState.ERROR_PUNCH_PAIRING)
+                    await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_PUNCH_PAIRING.value})
                     raise Exception('ERROR: Couldn\'t initiate punch pairing!')
 
     async def hole_punching(self):
@@ -173,7 +173,7 @@ class JoyDance:
             self.console_conn = console_conn
             print('Connected with {}:{}'.format(addr[0], addr[1]))
         except Exception as e:
-            await self.on_state_changed(self.joycon.serial, PairingState.ERROR_HOLE_PUNCHING)
+            await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_HOLE_PUNCHING.value})
             raise e
 
     async def send_message(self, __class, data={}):
@@ -194,6 +194,7 @@ class JoyDance:
 
     async def set_rumble_enabled(self, enabled):
         self.joycon.rumble_enabled = enabled
+        await self.on_state_changed(self.joycon.serial, {'rumble_enabled': enabled})
         if enabled:
             # Give a little buzz to indicate that rumble is enabled
             await self.handle_rumble_on_sound_index(0)
@@ -253,7 +254,7 @@ class JoyDance:
             await self.handle_rumble_on_sound_index(sound_index)
         elif __class == 'JD_PhoneDataCmdSyncEnd':
             await self.send_message('JD_PhoneDataCmdSyncEnd', {'phoneID': message['phoneID']})
-            await self.on_state_changed(self.joycon.serial, PairingState.CONNECTED)
+            await self.on_state_changed(self.joycon.serial, {'state': PairingState.CONNECTED.value})
         elif __class == 'JD_EnableAccelValuesSending_ConsoleCommandData':
             self.should_start_accelerometer = True
             self.number_of_accels_sent = 0
@@ -604,17 +605,17 @@ class JoyDance:
                     )
 
                 except websockets.ConnectionClosed:
-                    await self.on_state_changed(self.joycon.serial, PairingState.ERROR_CONSOLE_CONNECTION)
+                    await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_CONSOLE_CONNECTION.value})
                     await self.disconnect(close_ws=False)
         except Exception:
             traceback.print_exc()
-            await self.on_state_changed(self.joycon.serial, PairingState.ERROR_CONSOLE_CONNECTION)
+            await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_CONSOLE_CONNECTION.value})
             await self.disconnect(close_ws=False)
 
     async def disconnect(self, close_ws=True):
         print('disconnected')
         self.disconnected = True
-        self.joycon.__del__()
+        await self.on_state_changed(self.joycon.serial, {'state': PairingState.DISCONNECTED.value})
 
         if close_ws and self.ws:
             await self.ws.close()
@@ -622,21 +623,21 @@ class JoyDance:
     async def pair(self):
         try:
             if self.console_ip_addr:
-                await self.on_state_changed(self.joycon.serial, PairingState.CONNECTING)
+                await self.on_state_changed(self.joycon.serial, {'state': PairingState.CONNECTING.value})
                 if self.protocol_version == WsSubprotocolVersion.V1:
                     self.pairing_url = 'ws://{}:8080/smartphone'.format(self.console_ip_addr)
                 else:
                     self.pairing_url = 'wss://{}:8080/smartphone'.format(self.console_ip_addr)
             else:
-                await self.on_state_changed(self.joycon.serial, PairingState.GETTING_TOKEN)
+                await self.on_state_changed(self.joycon.serial, {'state': PairingState.GETTING_TOKEN.value})
                 print('Getting authorication token...')
                 await self.get_access_token()
 
-                await self.on_state_changed(self.joycon.serial, PairingState.PAIRING)
+                await self.on_state_changed(self.joycon.serial, {'state': PairingState.PAIRING.value})
                 print('Sending pairing code...')
                 await self.send_pairing_code()
 
-                await self.on_state_changed(self.joycon.serial, PairingState.CONNECTING)
+                await self.on_state_changed(self.joycon.serial, {'state': PairingState.CONNECTING.value})
                 print('Connecting with console...')
                 if self.requires_punch_pairing:
                     await self.send_initiate_punch_pairing()
