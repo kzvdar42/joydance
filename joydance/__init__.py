@@ -83,6 +83,7 @@ class JoyDance:
         }
 
         self.console_conn = None
+        self.profile_data = {}
         self.v1_row_num = 0
         self.v1_col_num_per_row_id = defaultdict(int)
         self.v1_num_columns_per_row_id = {}
@@ -243,6 +244,23 @@ class JoyDance:
             await asyncio.sleep(0.2)
             self.joycon.stop_rumble()
 
+    async def parse_profile_data(self, profile_data):
+        player_id = profile_data.get('playerId')
+        # Indexing starts from 0
+        if player_id is not None:
+            player_id += 1
+        color = profile_data.get('color')
+        if color is not None:
+            color = [int(c * 255) for c in color]
+        self.profile_data = {
+            'player_name': profile_data.get('name'),
+            'player_id': player_id,
+            'player_color': color,
+            'player_image': profile_data.get('image'),
+            'skin_image': profile_data.get('skinImage'),
+            'additional_message': profile_data.get('additionalMessage'),
+        }
+
     async def on_message(self, message):
         message = json.loads(message)
         if message.get('__class') != 'JD_PhoneUiSetupData':
@@ -252,6 +270,9 @@ class JoyDance:
         __class = message['__class']
         if __class == 'JD_PhoneDataCmdHandshakeContinue':
             await self.send_message('JD_PhoneDataCmdSync', {'phoneID': message['phoneID']})
+        elif __class == 'JD_ProfilePhoneUiData':
+            await self.parse_profile_data(message)
+            await self.on_state_changed(self.joycon.serial, self.profile_data)
         elif __class == 'JD_PlaySound_ConsoleCommandData':
             sound_index = message.get('soundIndex', 0)
             await self.handle_rumble_on_sound_index(sound_index)
@@ -305,7 +326,7 @@ class JoyDance:
             if message['isPopup'] == 1:
                 self.is_input_allowed = True
             else:
-                self.is_input_allowed = (message.get('inputSetup', {}).get('isEnabled', 0) == 1)
+                self.is_input_allowed = message.get('inputSetup', {}).get('isEnabled', 0) == 1
 
         await self.on_game_message(message)
 
