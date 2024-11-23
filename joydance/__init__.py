@@ -291,9 +291,7 @@ class JoyDance:
             self.is_search_opened = True
         elif __class == 'JD_CancelKeyboard_ConsoleCommandData':
             self.is_search_opened = False
-        elif __class == 'JD_TriggerTransition_ConsoleCommandData':
-            # after transition, keyboard is closed
-            # FIXME: this is not reliable, as sometimes keyboard error screen can trigger this
+        elif __class == 'JD_ClosePopup_ConsoleCommandData':
             self.is_search_opened = False
         elif __class == 'JD_PhoneUiSetupData':
             self.is_input_allowed = True
