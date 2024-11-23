@@ -84,6 +84,8 @@ class JoyDance:
 
         self.console_conn = None
         self.profile_data = {}
+        # updates on `parse_profile_data` call
+        self.v1_is_main_player = True
         self.v1_row_num = 0
         self.v1_col_num_per_row_id = defaultdict(int)
         self.v1_num_columns_per_row_id = {}
@@ -249,6 +251,7 @@ class JoyDance:
         # Indexing starts from 0
         if player_id is not None:
             player_id += 1
+            self.v1_is_main_player = player_id == 1
         color = profile_data.get('color')
         if color is not None:
             color = [int(c * 255) for c in color]
@@ -434,6 +437,9 @@ class JoyDance:
         data = {}
         if cmd == Command.PAUSE:
             __class = 'JD_Pause_PhoneCommandData'
+        # further commands are only for main player
+        elif not self.v1_is_main_player:
+            return None, None
         elif cmd == Command.BACK:
             if self.is_search_opened:
                 __class = 'JD_CancelKeyboard_PhoneCommandData'
