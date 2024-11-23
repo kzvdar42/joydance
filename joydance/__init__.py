@@ -551,7 +551,12 @@ class JoyDance:
 
                 # Send command to server
                 if cmd:
-                    __class, data = await self.preprocess_command(cmd)
+                    try:
+                        __class, data = await self.preprocess_command(cmd)
+                    except Exception:
+                        print(f"An error occurred while processing command for {self.joycon.serial}.")
+                        print(traceback.format_exc())
+                        continue
                     # if __class is None, it means the command is not allowed to be sent
                     if __class is None:
                         continue
