@@ -253,7 +253,7 @@ class JoyCon extends Component {
         }
     }
 
-    render(props, { name, state, pairing_code, is_left, color, battery_level, rumble_enabled }) {
+    render(props, { name, state, pairing_code, is_left, color, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message }) {
         const joyconState = state
         const stateMessage = PairingStateMessage[joyconState]
         let showButton = true
@@ -281,6 +281,13 @@ class JoyCon extends Component {
                             <span class="battery-level ${batteryLevel}">${SVG_BATTERY_LEVEL}</span>
                         </div>
                         <span class="joycon-state">${stateMessage}</span>
+                        ${player_name && html`
+                            <div class="player-info">
+                                <span class="player-color" style="background-color: rgba(${player_color[0]}, ${player_color[1]}, ${player_color[2]}, ${player_color[3]})"></span>
+                                <span>P${player_id}: ${player_name}</span>
+                                ${additional_message && html`<span>${additional_message}</span>`}
+                            </div>
+                        `}
                     </div>
                     <div class="pure-u-4-24 flex">
                         ${pairing_code && html`

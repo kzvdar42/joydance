@@ -398,3 +398,12 @@ select option {
         margin-top: 8px;
     }
 }
+
+.player-color {
+    border-radius: 50%;
+    width: 12px;
+    height: 12px;
+    align-items: center;
+    display: inline-block;
+    margin-right: 8px;
+}
