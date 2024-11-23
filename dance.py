@@ -113,7 +113,6 @@ async def get_joycon_list(app):
 
 async def connect_joycon(app, ws, data):
     async def on_joydance_state_changed(serial, update_dict):
-        print(serial, update_dict)
         app['joycons_info'][serial].update(update_dict)
         try:
             await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app['joycons_info'][serial])
@@ -313,6 +312,7 @@ async def websocket_handler(request):
     await ws.prepare(request)
 
     async for msg in ws:
+        print('got ws msg', msg)
         if msg.type == WSMsgType.TEXT:
             try:
                 msg_data = msg.json()
