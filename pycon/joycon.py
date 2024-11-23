@@ -75,6 +75,32 @@ class JoyCon:
             self._joycon_device.close()
             self._joycon_device = None
 
+    def close(self):
+        """Safely closes the connection without fully deleting the object"""
+        self._should_run = False
+        try:
+            if hasattr(self, '_joycon_device') and self._joycon_device:
+                self._close()
+        except Exception:
+            pass
+
+    def is_connected(self):
+        """Checks if the JoyCon is currently connected"""
+        try:
+            # Attempt to get status as a connection test
+            self.get_status()
+            return True
+        except Exception:
+            return False
+
+    async def reconnect(self):
+        """Attempts to reconnect to the JoyCon"""
+        try:
+            self._connect()
+            return True
+        except Exception:
+            return False
+
     def _read_input_report(self) -> bytes:
         if self._joycon_device:
             return bytes(self._joycon_device.read(self._INPUT_REPORT_SIZE))
