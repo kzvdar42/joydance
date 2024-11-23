@@ -425,6 +425,23 @@ class JoyDance:
         elif cmd == Command.V1_FAVORITE:
             __class = 'JD_Input_PhoneCommandData'
             data['input'] = cmd.value
+        elif cmd == Command.ACCEPT:
+            if self.is_in_lobby:
+                __class = 'JD_StartGame_PhoneCommandData'
+            elif self.is_on_recap:
+                __class = 'JD_Input_PhoneCommandData'
+                data['input'] = Command.ACCEPT.value
+            elif self.is_search_opened:
+                __class = 'JD_Input_PhoneCommandData'
+                data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
+            else:
+                __class = 'ValidateAction_PhoneCommandData'
+                data['rowIndex'] = self.v1_row_num
+                data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
+                data['actionIndex'] = self.v1_action_id
+        # further commands are enabled only then is_input_allowed=True
+        elif not self.is_input_allowed:
+            return None, None
         elif cmd == Command.UP:
             if self.is_in_lobby:
                 return None, None
@@ -475,20 +492,6 @@ class JoyDance:
                     return None, None
                 self.v1_coach_id += 1
                 data['coachId'] = self.v1_coach_id
-        elif cmd == Command.ACCEPT:
-            if self.is_in_lobby:
-                __class = 'JD_StartGame_PhoneCommandData'
-            elif self.is_on_recap:
-                __class = 'JD_Input_PhoneCommandData'
-                data['input'] = Command.ACCEPT.value
-            elif self.is_search_opened:
-                __class = 'JD_Input_PhoneCommandData'
-                data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
-            else:
-                __class = 'ValidateAction_PhoneCommandData'
-                data['rowIndex'] = self.v1_row_num
-                data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
-                data['actionIndex'] = self.v1_action_id
         return __class, data
 
     async def preprocess_command(self, cmd):
