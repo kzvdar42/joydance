@@ -36,7 +36,7 @@ export default class SearchInput extends Component {
 
         return html`
             <div class="search-overlay">
-                <h3>Search:</h3>
+                <h2 class="pure-u-18-24">Search</h2>
                 <form class="pure-form" onSubmit=${this.handleSubmit}>
                     <input 
                         type="text" 
