@@ -316,9 +316,19 @@ class JoyDance:
 
     async def on_message(self, message):
         message = json.loads(message)
+        # don't print data from UI setup data (too big)
         if message.get('__class') != 'JD_PhoneUiSetupData':
-            # don't print UI setup data
-            print('<<<', message)
+            print('<<<', self.profile_data.get('player_id'), message)
+        else:
+            print(
+                '<<<',
+                self.profile_data.get('player_id'),
+                'JD_PhoneUiSetupData',
+                message.get('isPopup'),
+                message.get('inputSetup'),
+                message.get('setupData'),
+                message.keys()
+            )
 
         __class = message['__class']
         if __class == 'JD_PhoneDataCmdHandshakeContinue':
