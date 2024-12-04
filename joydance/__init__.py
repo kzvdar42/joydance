@@ -473,19 +473,17 @@ class JoyDance:
             if self.is_in_lobby:
                 return None, None
             __class = 'ChangeRow_PhoneCommandData'
-            if self.v1_row_num <= 0:
-                self.v1_row_num = len(self.v1_num_columns_per_row_id)
-                return None, None
             self.v1_row_num -= 1
+            if self.v1_row_num < 0:
+                self.v1_row_num = len(self.v1_num_columns_per_row_id) - 1
             data['rowIndex'] = self.v1_row_num
         elif cmd == Command.DOWN:
             if self.is_in_lobby:
                 return None, None
             __class = 'ChangeRow_PhoneCommandData'
-            if self.v1_row_num >= len(self.v1_num_columns_per_row_id) - 1:
-                self.v1_row_num = 0
-                return None, None
             self.v1_row_num += 1
+            if self.v1_row_num >= len(self.v1_num_columns_per_row_id):
+                self.v1_row_num = 0
             data['rowIndex'] = self.v1_row_num
         elif cmd == Command.LEFT:
             if not self.is_in_lobby:
