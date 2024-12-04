@@ -3,5 +3,5 @@ __pycache__/
 config.cfg
 build/
 dist/
-dance.spec
+*.spec
 *.ipynb
