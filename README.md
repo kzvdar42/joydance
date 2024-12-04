@@ -7,9 +7,9 @@
 > This is a beta pre-release version, it still has bugs and wasn't tested on all platforms,
 > Please leave bug reports in [issues](https://github.com/kzvdar42/joydance/issues)
 
-<div style="text-align: center;">
+<p align="center">
     <img src="assets/screenshot.png" height="550">
-</div>
+</p>
 
 ## Demo
 https://youtu.be/f_1IkUHFdH8
