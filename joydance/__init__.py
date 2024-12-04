@@ -788,6 +788,20 @@ class JoyDance:
             self.v1_col_num_per_row_id[self.v1_row_num] = carousel_pos_setup['itemIndex']
             self.v1_action_id = carousel_pos_setup['actionIndex']
 
+    @staticmethod
+    def parse_actions(raw_item_actions):
+        item_actions = []
+        for item_action in raw_item_actions:
+            parsed_action = item_action.get('command', '')
+            if parsed_action:
+                try:
+                    parsed_action = json.loads(parsed_action)['root']
+                except:
+                    print(f'Failed to parse command: {item_action}')
+                    parsed_action = ''
+            item_actions.append(parsed_action)
+        return item_actions
+
     async def parse_phone_setup_data(self, data):
         """
         Parse the phone setup data and update the state accordingly.
@@ -817,8 +831,12 @@ class JoyDance:
         if main_carousel_rows:
             # Extract the main carousel rows
             num_columns_per_row_id = {}
+            all_item_actions = defaultdict(dict)
             for row_num, row in enumerate(main_carousel_rows):
                 num_columns_per_row_id[row_num] = len(row['items'])
+                for item_idx, item in enumerate(row.get('items', [])):
+                    all_item_actions[row_num][item_idx] = self.parse_actions(item.get('actions', []))
+            self.v1_item_actions = all_item_actions
             self.v1_num_columns_per_row_id = num_columns_per_row_id
         # Set values as in provided setup
         carousel_pos_setup = data.get('inputSetup', {}).get('carouselPosSetup', {})
