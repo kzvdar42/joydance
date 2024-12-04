@@ -7,6 +7,8 @@ import socket
 import time
 from configparser import ConfigParser
 from enum import Enum
+import os
+import sys
 
 import aiohttp
 import hid
@@ -284,7 +286,7 @@ Open http://localhost:32623 in your browser.''')
 
 async def html_handler(request):
     config = dict((parse_config()).items('joydance'))
-    with open('static/index.html', 'r') as f:
+    with open(get_static_path('static/index.html'), 'r') as f:
         html = f.read()
         html = html.replace('[[CONFIG]]', json.dumps(config))
         html = html.replace('[[VERSION]]', JOYDANCE_VERSION)
@@ -358,7 +360,18 @@ async def websocket_handler(request):
 
 
 def favicon_handler(request):
-    return web.FileResponse('static/favicon.png')
+    return web.FileResponse(get_static_path('static/favicon.png'))
+
+
+def get_static_path(relative_path):
+    if getattr(sys, 'frozen', False):
+        # If the application is frozen (running as an executable)
+        base_path = sys._MEIPASS  # This is where PyInstaller unpacks the files
+    else:
+        # If the application is running in a normal Python environment
+        base_path = os.path.dirname(__file__)
+    
+    return os.path.join(base_path, relative_path)
 
 
 app = web.Application()
@@ -370,8 +383,8 @@ app.add_routes([
     web.get('/', html_handler),
     web.get('/favicon.png', favicon_handler),
     web.get('/ws', websocket_handler),
-    web.static('/css', 'static/css'),
-    web.static('/js', 'static/js'),
+    web.static('/css', get_static_path('static/css')),
+    web.static('/js', get_static_path('static/js')),
 ])
 
 web.run_app(app, port=32623)
