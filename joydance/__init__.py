@@ -86,18 +86,68 @@ class JoyDance:
         self.profile_data = {}
         # updates on `parse_profile_data` call
         self.v1_is_main_player = True
-        self.v1_row_num = 0
-        self.v1_col_num_per_row_id = defaultdict(int)
-        self.v1_num_columns_per_row_id = {}
+        self.v1_carousel_setup = defaultdict(
+            lambda: {
+                'row_num': 0,
+                'col_num_per_row_id': defaultdict(int),
+                'num_columns_per_row_id': {},
+                'item_actions': {},
+                'action_id': 0,
+            }
+        )
+        self.current_carousel_type = 'main'
         self.v1_coach_id = 0
         self.v1_num_coaches = 0
-        self.v1_action_id = 0
         self.is_in_lobby = False
         self.is_on_recap = False
         self.is_search_opened = False
 
         self.reconnection_task = None
         self.should_reconnect = True  # Flag to control reconnection attempts
+
+    @property
+    def carousel_setup(self):
+        return self.v1_carousel_setup[self.current_carousel_type]
+
+    @property
+    def v1_row_num(self):
+        return self.v1_carousel_setup[self.current_carousel_type]['row_num']
+
+    @v1_row_num.setter
+    def v1_row_num(self, value):
+        self.v1_carousel_setup[self.current_carousel_type]['row_num'] = value
+
+    @property
+    def v1_col_num_per_row_id(self):
+        return self.v1_carousel_setup[self.current_carousel_type]['col_num_per_row_id']
+
+    @v1_col_num_per_row_id.setter
+    def v1_col_num_per_row_id(self, value):
+        self.v1_carousel_setup[self.current_carousel_type]['col_num_per_row_id'] = value
+
+    @property
+    def v1_num_columns_per_row_id(self):
+        return self.v1_carousel_setup[self.current_carousel_type]['num_columns_per_row_id']
+    
+    @property
+    def v1_item_actions(self):
+        return self.v1_carousel_setup[self.current_carousel_type]['item_actions']
+
+    @v1_item_actions.setter
+    def v1_item_actions(self, value):
+        self.v1_carousel_setup[self.current_carousel_type]['item_actions'] = value
+
+    @v1_num_columns_per_row_id.setter
+    def v1_num_columns_per_row_id(self, value):
+        self.v1_carousel_setup[self.current_carousel_type]['num_columns_per_row_id'] = value
+
+    @property
+    def v1_action_id(self):
+        return self.v1_carousel_setup[self.current_carousel_type]['action_id']
+
+    @v1_action_id.setter
+    def v1_action_id(self, value):
+        self.v1_carousel_setup[self.current_carousel_type]['action_id'] = value
 
     def get_random_port(self):
         ''' Randomize a port number, to be used in hole_punching() later '''
@@ -747,26 +797,43 @@ class JoyDance:
         self.is_on_recap = False
         self.is_in_lobby = False
         self.is_search_opened = False
+        # parse at which carousel we are right now
+        if (
+            data.get('isPopup')
+            # NOTE: this popup is not described as pop-up, but we still
+            # identify it as popup to not break navigation on main carousel
+            or data.get('setupData', {}).get('mainCarousel', {}).get('rows', [{}])[0].get('items', [{}])[0].get('title') == "[icon:GEN-VALIDATE] Quit"
+        ):
+            self.current_carousel_type = 'popup'
+        elif data.get('setupData', {}).get('lobbySetup'):
+            self.current_carousel_type = 'lobby'
+        elif data.get('setupData', {}).get('recapSetup'):
+            self.current_carousel_type = 'recap'
+        else:
+            self.current_carousel_type = 'main'
+
         # Extract the main carousel structure
-        man_carousel_rows = data.get('setupData', {}).get('mainCarousel', {}).get('rows', [])
-        if man_carousel_rows:
+        main_carousel_rows = data.get('setupData', {}).get('mainCarousel', {}).get('rows', [])
+        if main_carousel_rows:
             # Extract the main carousel rows
             num_columns_per_row_id = {}
-            for row_num, row in enumerate(man_carousel_rows):
+            for row_num, row in enumerate(main_carousel_rows):
                 num_columns_per_row_id[row_num] = len(row['items'])
             self.v1_num_columns_per_row_id = num_columns_per_row_id
-        # Check if the game is on pop up screen
-        carousel_pop_setup = data.get('inputSetup', {}).get('carouselPosSetup', {})
-        if carousel_pop_setup:
-            self.v1_row_num = carousel_pop_setup['rowIndex']
-            self.v1_col_num_per_row_id[self.v1_row_num] = carousel_pop_setup['itemIndex']
-            self.v1_action_id = carousel_pop_setup['actionIndex']
+        # Set values as in provided setup
+        carousel_pos_setup = data.get('inputSetup', {}).get('carouselPosSetup', {})
+        if carousel_pos_setup:
+            self.v1_row_num = carousel_pos_setup['rowIndex']
+            self.v1_col_num_per_row_id[self.v1_row_num] = carousel_pos_setup['itemIndex']
+            self.v1_action_id = carousel_pos_setup['actionIndex']
             self.v1_coach_id = 0
-        # Check if the game is in lobby screen, and extract the number of coaches
-        coaches = data.get('setupData', {}).get('lobbySetup', {}).get('coaches', [])
-        if coaches:
+        # Check if the game is in lobby screen, and extract needed data
+        lobby_setup = data.get('setupData', {}).get('lobbySetup', {})
+        if lobby_setup:
             self.is_in_lobby = True
-            self.v1_num_coaches = len(coaches)
+            self.num_columns_per_row_id = {0: 1}
+            self.v1_item_actions = {0: {0: self.parse_actions(lobby_setup.get('startButton', {}).get('actions', []))}}
+            self.v1_num_coaches = len(lobby_setup.get('coaches', []))
         # Check if the game is on recap screen
         if data.get('setupData', {}).get('recapSetup', {}):
             self.is_on_recap = True
