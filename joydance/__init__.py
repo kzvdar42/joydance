@@ -484,12 +484,33 @@ class JoyDance:
         return __class, data
 
     async def preprocess_command_for_v1(self, cmd):
-        data = {}
+        __class, data = None, {}
+
         if cmd == Command.PAUSE:
             __class = 'JD_Pause_PhoneCommandData'
         # further commands are only for main player
         elif not self.v1_is_main_player:
-            return None, None
+            # TODO: code repetition, need to refactor
+            # non-main controller can only change coach in lobby
+            if not self.is_in_lobby:
+                return None, None
+            if cmd == Command.LEFT:
+                __class = 'JD_ChangeCoach_PhoneCommandData'
+                if self.v1_coach_id == 0:
+                    return None, None
+                elif self.v1_coach_id < 0:
+                    self.v1_coach_id = 0
+                    return None, None
+                self.v1_coach_id -= 1
+                data['coachId'] = self.v1_coach_id
+            elif cmd == Command.RIGHT:
+                __class = 'JD_ChangeCoach_PhoneCommandData'
+                if self.v1_coach_id >= self.v1_num_coaches - 1:
+                    self.v1_coach_id = self.v1_num_coaches - 1
+                    return None, None
+                self.v1_coach_id += 1
+                data['coachId'] = self.v1_coach_id
+            return __class, data
         elif cmd == Command.BACK:
             if self.is_search_opened:
                 __class = 'JD_CancelKeyboard_PhoneCommandData'
