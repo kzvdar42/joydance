@@ -1,12 +1,21 @@
 # JoyDance
 
-![image](https://user-images.githubusercontent.com/96280/163298419-6279f338-069e-4302-971f-b9d2e5fc9f7a.png)
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/W7W816C8NK)
+
+
+> [!WARNING]
+> This is a beta pre-release version, it still has bugs and wasn't tested on all platforms,
+> Please leave bug reports in [issues](https://github.com/kzvdar42/joydance/issues)
+
+<div style="text-align: center;">
+    <img src="assets/screenshot.png" height="550">
+</div>
 
 ## Demo
 https://youtu.be/f_1IkUHFdH8
 
 ## Features
-- Play Just Dance 2016 and later on all platforms with Joy-Cons.
+- Play Just Dance 2016-2022 on all platforms with Joy-Cons.
 - Playing with a Joy-Con (+ its strap) is safer and more comfortable than holding a phone.
 - No latency.
 - Better score than using a phone (hopefully).
@@ -17,9 +26,7 @@ https://youtu.be/f_1IkUHFdH8
 |              | Xbox Series | Xbox One | PS4/5 | NSW | Stadia | PC | Wii U |
 |--------------|:-----------:|:--------:|:-----:|:---:|:------:|:--:|:-----:|
 | 2020-2022    | ✅          | ✅       | ✅    | ✅  | ✅    |    |       |
-| 2016-2019 ⚠️ |             | ✅       | ✅    | ✅  |       | ✅ | ✅    |
-
-⚠️ **Important**: Can't use buttons on Joy-Con to navigate the UI in JD 2016-2019 (you'll have to use controllers/keyboard). See [#6](../../issues/6).
+| 2016-2019    |             | ✅       | ✅    | ✅  |       | ✅ | ✅    |
 
   
 ## How does it work?
@@ -28,7 +35,7 @@ It pretends to be the [Just Dance Controller app](https://play.google.com/store/
 ## Tested on
 - MacOS Catalina 10.15 with [TP-Link Bluetooth 4.0 Nano USB Adapter UB400](https://www.tp-link.com/us/home-networking/usb-adapter/ub400/).
 - Raspberry Pi Zero 2 W (Bullseye, kernel 5.15) with [MPOW BH519A Bluetooth 5.1 USB Adapter](https://www.xmpow.com/products/mpow-bh519a-bluetooth-5-1-usb-adapter-for-pc). Tested with 2 Joy-Cons and it worked just fine.
-  
+- Windows 11 23H2 with ORICO-BTA-408-PK (BT 4.0)
 
 ## Requirements
 - PC/Mac/Linux with bluetooth support. Doesn't work with Chrome OS/Crostini ([#15](../../issues/15)).
@@ -37,6 +44,11 @@ It pretends to be the [Just Dance Controller app](https://play.google.com/store/
 - It's **RECOMMENDED** to:
   - Use a Bluetooth dongle, because built-in Bluetooth sucks (or you will get disconnected constantly while playing). Make sure you buy a dongle with game controllers support, not just for audio devices. Not all dongles support Mac/Linux, so remember to check compatibility before buying.
   - Use a Nintendo Switch to update Joy-Con to the latest firmware & calibate its motion sensors. Ask your friends or bring it to the game shop if you don't have one.
+
+
+> [!WARNING]
+> Bluetooth 5.0+ dongles seem to not be able to re-connect to previosly paired JoyCons, at least on Windows
+
 
 ## Installation
 
@@ -124,6 +136,23 @@ pip3 install -r requirements.txt
 
 8. 💃🕺
 
+## Future Work
+Plans for future work:
+- [ ] Smooth out bugs
+- [ ] Better support for reconnecting JoyCons
+- [ ] Improve Just Dance 2016-2019 compatibility (not all input is supported)
+- [ ] Add debug flag
+- [ ] Proper executables and Docker container for ease of use
+
+Maybe also this?
+- [ ] Add support for Wii Remote?
+- [ ] Support JDEXE?
+
+Leave your suggestions in [issues](https://github.com/kzvdar42/joydance/issues)
+
+## Support
+If you'd like to support my efforts, you can do so through ko-fi or PayPal. However, please only contribute if you value the work that has been completed so far. I cannot promise ongoing support in the future. Currently, I am dedicated to refining and enhancing this project, but circumstances may change, such as personal issues, work deadlines, or the basic loss of motivation.
+
 ## FAQ
 1. **What is the correct way to hold a Joy-Con?**  
   Please follow these images for [Joy-Con (L)](https://static.wikia.nocookie.net/justdance/images/2/20/Hold_joy-constrap_blue.png) and [Joy-Con (R)](https://static.wikia.nocookie.net/justdance/images/8/8a/Hold_joy-constrap_04.png).  
@@ -149,7 +178,11 @@ pip3 install -r requirements.txt
 5. **Can I play Just Dance 2017 (PC) and run JoyDance on the same PC?**  
   Yes, you can.
 
+6. **Why this is a fork?**
+  Since the original creator of JoyDance, [redphx](https://github.com/redphx), is currently engaged in other projects, I decided to fork his work and carry it forward.
+
 ## Acknowledgements
 -  [dekuNukem/Nintendo_Switch_Reverse_Engineering](https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering)
 -  [tocoteron/joycon-python](https://github.com/tocoteron/joycon-python)
 -  [Davidobot/BetterJoy](https://github.com/Davidobot/BetterJoy)
+-  [redphx/joydance up to v0.5.2](https://github.com/redphx/joydance)
