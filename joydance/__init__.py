@@ -503,19 +503,34 @@ class JoyDance:
             __class = 'JD_Input_PhoneCommandData'
             data['input'] = cmd.value
         elif cmd == Command.ACCEPT:
-            if self.is_in_lobby:
-                __class = 'JD_StartGame_PhoneCommandData'
-            elif self.is_on_recap:
-                __class = 'JD_Input_PhoneCommandData'
-                data['input'] = Command.ACCEPT.value
-            elif self.is_search_opened:
-                __class = 'JD_Input_PhoneCommandData'
-                data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
+            row_idx, col_idx, action_idx = (
+                self.v1_row_num, self.v1_col_num_per_row_id[self.v1_row_num], self.v1_action_id
+            )
+            try:
+                selected_action = self.v1_item_actions[row_idx][col_idx][action_idx]
+            except:
+                selected_action = ''
+            if selected_action:
+                return selected_action.pop('__class'), selected_action
             else:
                 __class = 'ValidateAction_PhoneCommandData'
-                data['rowIndex'] = self.v1_row_num
-                data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
-                data['actionIndex'] = self.v1_action_id
+                data['rowIndex'] = row_idx
+                data['itemIndex'] = col_idx
+                data['actionIndex'] = action_idx
+            # TODO: delete after testing updated logic
+            # if self.is_in_lobby:
+            #     __class = 'JD_StartGame_PhoneCommandData'
+            # elif self.is_on_recap:
+            #     __class = 'JD_Input_PhoneCommandData'
+            #     data['input'] = Command.ACCEPT.value
+            # elif self.is_search_opened:
+            #     __class = 'JD_Input_PhoneCommandData'
+            #     data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
+            # else:
+            #     __class = 'ValidateAction_PhoneCommandData'
+            #     data['rowIndex'] = self.v1_row_num
+            #     data['itemIndex'] = self.v1_col_num_per_row_id[self.v1_row_num]
+            #     data['actionIndex'] = self.v1_action_id
         # further commands are enabled only then is_input_allowed=True
         elif not self.is_input_allowed:
             return None, None
