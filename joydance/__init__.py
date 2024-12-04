@@ -677,8 +677,10 @@ class JoyDance:
 
                     # Only send input when it's allowed to, otherwise we might get a disconnection
                     if self.is_input_allowed:
+                        # print(f'>>> {__class} {data}')
                         await self.send_message(__class, data)
-                        await asyncio.sleep(FRAME_DURATION * 10)
+                        # TODO: maybe add to configuration?
+                        await asyncio.sleep(FRAME_DURATION * 30)
             except Exception:
                 traceback.print_exc()
                 await self.disconnect()
