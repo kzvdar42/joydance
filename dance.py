@@ -265,14 +265,15 @@ def save_config(parser):
 
 
 async def on_startup(app):
-    print('''
+    print(f'''
      ░░  ░░░░░░  ░░    ░░ ░░░░░░   ░░░░░  ░░░    ░░  ░░░░░░ ░░░░░░░
      ▒▒ ▒▒    ▒▒  ▒▒  ▒▒  ▒▒   ▒▒ ▒▒   ▒▒ ▒▒▒▒   ▒▒ ▒▒      ▒▒
      ▒▒ ▒▒    ▒▒   ▒▒▒▒   ▒▒   ▒▒ ▒▒▒▒▒▒▒ ▒▒ ▒▒  ▒▒ ▒▒      ▒▒▒▒▒
 ▓▓   ▓▓ ▓▓    ▓▓    ▓▓    ▓▓   ▓▓ ▓▓   ▓▓ ▓▓  ▓▓ ▓▓ ▓▓      ▓▓
  █████   ██████     ██    ██████  ██   ██ ██   ████  ██████ ███████
 
-Open http://localhost:32623 in your browser.''')
+Open http://localhost:32623 in your browser.
+Running version {JOYDANCE_VERSION}''')
 
     # Check for update
     async def get_latest_tag_from_api_and_compare(api_endpoint: str) -> bool:
@@ -287,7 +288,6 @@ Open http://localhost:32623 in your browser.''')
                 else:
                     # parse from list of tags
                     latest_version = json_body[0]['name'][1:]
-                print('Running version {}.'.format(JOYDANCE_VERSION))
                 if JOYDANCE_VERSION != latest_version:
                     print('\033[93m{}\033[00m'.format('Version {} is available: https://github.com/kzvdar42/joydance'.format(latest_version)))
                 return True
