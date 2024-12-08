@@ -392,17 +392,18 @@ def get_static_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-app = web.Application()
-app['joydance_connections'] = {}
-app['joycons_info'] = {}
+if __name__ == '__main__':
+    app = web.Application()
+    app['joydance_connections'] = {}
+    app['joycons_info'] = {}
 
-app.on_startup.append(on_startup)
-app.add_routes([
-    web.get('/', html_handler),
-    web.get('/favicon.png', favicon_handler),
-    web.get('/ws', websocket_handler),
-    web.static('/css', get_static_path('static/css')),
-    web.static('/js', get_static_path('static/js')),
-])
+    app.on_startup.append(on_startup)
+    app.add_routes([
+        web.get('/', html_handler),
+        web.get('/favicon.png', favicon_handler),
+        web.get('/ws', websocket_handler),
+        web.static('/css', get_static_path('static/css')),
+        web.static('/js', get_static_path('static/js')),
+    ])
 
-web.run_app(app, port=32623)
+    web.run_app(app, port=32623)
