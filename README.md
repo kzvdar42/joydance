@@ -52,7 +52,7 @@ It pretends to be the [Just Dance Controller app](https://play.google.com/store/
 
 ## Installation
 
-1. Download [the latest version](https://github.com/redphx/joydance/releases/latest/) and extract it into a folder.
+1. Download [the latest version](https://github.com/kzvdar42/joydance/releases/latest/) and extract it into a folder.
 2. Open that folder in Terminal/Command Prompt, then run this command:
 ```
 pip3 install -r requirements.txt

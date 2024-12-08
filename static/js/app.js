@@ -565,7 +565,7 @@ class App extends Component {
                 </div>
             </div>
             <div class="footer">
-                <a href="https://github.com/redphx/joydance" target="_blank">${window.VERSION}</a>
+                <a href="https://github.com/kzvdar42/joydance" target="_blank">${window.VERSION}</a>
             </div>
         `
     }

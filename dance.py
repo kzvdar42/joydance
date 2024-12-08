@@ -289,16 +289,16 @@ Open http://localhost:32623 in your browser.''')
                     latest_version = json_body[0]['name'][1:]
                 print('Running version {}.'.format(JOYDANCE_VERSION))
                 if JOYDANCE_VERSION != latest_version:
-                    print('\033[93m{}\033[00m'.format('Version {} is available: https://github.com/redphx/joydance'.format(latest_version)))
+                    print('\033[93m{}\033[00m'.format('Version {} is available: https://github.com/kzvdar42/joydance'.format(latest_version)))
                 return True
         except:
             return False
 
     # Firstly check releases page, then page with tags
     async with aiohttp.ClientSession() as session:
-        if await get_latest_tag_from_api_and_compare('https://api.github.com/repos/redphx/joydance/releases/latest'):
+        if await get_latest_tag_from_api_and_compare('https://api.github.com/repos/kzvdar42/joydance/releases/latest'):
             return
-        if not await get_latest_tag_from_api_and_compare('https://api.github.com/repos/redphx/joydance/tags'):
+        if not await get_latest_tag_from_api_and_compare('https://api.github.com/repos/kzvdar42/joydance/tags'):
             print('Error: Unable to fetch the latest release information. Please check the repository URL or your internet connection.')
 
 
