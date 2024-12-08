@@ -275,13 +275,31 @@ async def on_startup(app):
 Open http://localhost:32623 in your browser.''')
 
     # Check for update
+    async def get_latest_tag_from_api_and_compare(api_endpoint: str) -> bool:
+        try:
+            async with session.get(api_endpoint, ssl=False) as resp:
+                if resp.status == 404:
+                    return False
+                json_body = await resp.json()
+                if isinstance(json_body, dict):
+                    # parse from latest version
+                    latest_version = json_body['tag_name'][1:]
+                else:
+                    # parse from list of tags
+                    latest_version = json_body[0]['name'][1:]
+                print('Running version {}.'.format(JOYDANCE_VERSION))
+                if JOYDANCE_VERSION != latest_version:
+                    print('\033[93m{}\033[00m'.format('Version {} is available: https://github.com/redphx/joydance'.format(latest_version)))
+                return True
+        except:
+            return False
+
+    # Firstly check releases page, then page with tags
     async with aiohttp.ClientSession() as session:
-        async with session.get('https://api.github.com/repos/redphx/joydance/releases/latest', ssl=False) as resp:
-            json_body = await resp.json()
-            latest_version = json_body['tag_name'][1:]
-            print('Running version {}.'.format(JOYDANCE_VERSION))
-            if JOYDANCE_VERSION != latest_version:
-                print('\033[93m{}\033[00m'.format('Version {} is available: https://github.com/redphx/joydance'.format(latest_version)))
+        if await get_latest_tag_from_api_and_compare('https://api.github.com/repos/redphx/joydance/releases/latest'):
+            return
+        if not await get_latest_tag_from_api_and_compare('https://api.github.com/repos/redphx/joydance/tags'):
+            print('Error: Unable to fetch the latest release information. Please check the repository URL or your internet connection.')
 
 
 async def html_handler(request):
