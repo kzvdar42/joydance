@@ -9,6 +9,7 @@ from configparser import ConfigParser
 from enum import Enum
 import os
 import sys
+import mimetypes
 
 import aiohttp
 import hid
@@ -394,6 +395,11 @@ def get_static_path(relative_path):
 
 if __name__ == '__main__':
     app = web.Application()
+    # Need to manually set media type mapping for js, as windows has a 
+    # bug in which it sometimes parses .js files at "text/plain"
+    mimetypes.init()
+    mimetypes.types_map['.js'] = 'application/javascript'
+
     app['joydance_connections'] = {}
     app['joycons_info'] = {}
 
