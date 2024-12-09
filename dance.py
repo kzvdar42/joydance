@@ -174,7 +174,6 @@ async def on_startup(app):
 ▓▓   ▓▓ ▓▓    ▓▓    ▓▓    ▓▓   ▓▓ ▓▓   ▓▓ ▓▓  ▓▓ ▓▓ ▓▓      ▓▓
  █████   ██████     ██    ██████  ██   ██ ██   ████  ██████ ███████
 
-Open http://localhost:32623 in your browser.
 Running version {JOYDANCE_VERSION}''')
 
     # Indicate where we read/save configs
@@ -327,4 +326,4 @@ if __name__ == '__main__':
         web.static('/js', get_static_path('static/js')),
     ])
 
-    web.run_app(app, port=32623)
+    web.run_app(app, host='localhost', port=32623)
