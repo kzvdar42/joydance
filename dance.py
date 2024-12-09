@@ -2,11 +2,7 @@ import asyncio
 import json
 import logging
 import platform
-import re
-import socket
 import time
-from configparser import ConfigParser
-from enum import Enum
 import os
 import sys
 import mimetypes
@@ -16,34 +12,20 @@ import hid
 from aiohttp import WSMsgType, web
 
 from joydance import JoyDance, PairingState
-from joydance.constants import (DEFAULT_CONFIG, JOYDANCE_VERSION,
-                                WsSubprotocolVersion)
+from joydance.config_handler import ConfigHandler, get_datadir
+from joydance.constants import (
+    WsCommand, PairingMethod, JOYDANCE_VERSION, WsSubprotocolVersion
+)
 from pycon import ButtonEventJoyCon, JoyCon
 from pycon.constants import JOYCON_PRODUCT_IDS, JOYCON_VENDOR_ID
 
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 
 
-class WsCommand(Enum):
-    GET_JOYCON_LIST = 'get_joycon_list'
-    CONNECT_JOYCON = 'connect_joycon'
-    DISCONNECT_JOYCON = 'disconnect_joycon'
-    UPDATE_JOYCON_STATE = 'update_joycon_state'
-    SEARCH_INPUT = 'search_input'
-    SHOW_SEARCH = 'show_search'
-    HIDE_SEARCH = 'hide_search'
-    TOGGLE_RUMBLE = 'toggle_rumble'
-
-
-class PairingMethod(Enum):
-    DEFAULT = 'default'
-    FAST = 'fast'
-    STADIA = 'stadia'
-    OLD = 'old'
-
-
-REGEX_PAIRING_CODE = re.compile(r'^\d{6}$')
-REGEX_LOCAL_IP_ADDRESS = re.compile(r'^(192\.168|10.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]))\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$')
+CONFIG_PATHS = [
+    'config.cfg',
+    os.path.join(get_datadir(), 'config.cfg')
+]
 
 
 async def get_device_ids():
@@ -140,24 +122,15 @@ async def connect_joycon(app, ws, data):
     console_ip_addr = data['console_ip_addr']
     pairing_code = data['pairing_code']
 
-    if not is_valid_pairing_method(pairing_method):
+    if not app['config_handler'].is_new_config_valid(data):
         return
 
-    if pairing_method == PairingMethod.DEFAULT.value:
-        if not is_valid_ip_address(host_ip_addr) or not is_valid_pairing_code(pairing_code):
-            return
-
-    if pairing_method == PairingMethod.FAST.value and not is_valid_ip_address(console_ip_addr):
-        return
-
-    config_parser = parse_config()
-    config = dict(config_parser.items('joydance'))
+    config = app['config_handler'].data.copy()
     config['pairing_code'] = pairing_code
     config['pairing_method'] = pairing_method
     config['host_ip_addr'] = host_ip_addr
     config['console_ip_addr'] = console_ip_addr
-    config_parser['joydance'] = config
-    save_config(config_parser)
+    app['config_handler'].data = config
 
     if pairing_method == PairingMethod.DEFAULT.value or pairing_method == PairingMethod.STADIA.value:
         app['joycons_info'][serial]['pairing_code'] = pairing_code
@@ -191,78 +164,6 @@ async def disconnect_joycon(app, ws, data):
     serial = data['joycon_serial']
     joydance = app['joydance_connections'][serial]
     await joydance.disconnect()
-
-
-def parse_config():
-    parser = ConfigParser()
-    parser.read('config.cfg')
-
-    if 'joydance' not in parser:
-        parser['joydance'] = DEFAULT_CONFIG
-    else:
-        tmp_config = DEFAULT_CONFIG.copy()
-        for key in tmp_config:
-            if key in parser['joydance']:
-                val = parser['joydance'][key]
-                if key == 'pairing_method':
-                    if not is_valid_pairing_method(val):
-                        val = PairingMethod.DEFAULT.value
-                elif key == 'host_ip_addr' or key == 'console_ip_addr':
-                    if not(is_valid_ip_address(val)):
-                        val = ''
-                elif key == 'pairing_code':
-                    if not is_valid_pairing_code(val):
-                        val = ''
-                elif key.startswith('accel_'):
-                    try:
-                        val = int(val)
-                    except Exception:
-                        val = DEFAULT_CONFIG[key]
-
-                tmp_config[key] = val
-
-        parser['joydance'] = tmp_config
-
-    if not parser['joydance']['host_ip_addr']:
-        host_ip_addr = get_host_ip()
-        if host_ip_addr:
-            parser['joydance']['host_ip_addr'] = host_ip_addr
-
-    save_config(parser)
-    return parser
-
-
-def is_valid_pairing_code(val):
-    return re.match(REGEX_PAIRING_CODE, val) is not None
-
-
-def is_valid_ip_address(val):
-    return re.match(REGEX_LOCAL_IP_ADDRESS, val) is not None
-
-
-def is_valid_pairing_method(val):
-    return val in [
-        PairingMethod.DEFAULT.value,
-        PairingMethod.FAST.value,
-        PairingMethod.STADIA.value,
-        PairingMethod.OLD.value,
-    ]
-
-
-def get_host_ip():
-    try:
-        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if ip.startswith('192.168') or ip.startswith('10.'):
-                return ip
-    except Exception:
-        pass
-
-    return None
-
-
-def save_config(parser):
-    with open('config.cfg', 'w') as fp:
-        parser.write(fp)
 
 
 async def on_startup(app):
@@ -304,7 +205,7 @@ Running version {JOYDANCE_VERSION}''')
 
 
 async def html_handler(request):
-    config = dict((parse_config()).items('joydance'))
+    config = request.app['config_handler'].data
     with open(get_static_path('static/index.html'), 'r') as f:
         html = f.read()
         html = html.replace('[[CONFIG]]', json.dumps(config))
@@ -400,8 +301,10 @@ if __name__ == '__main__':
     mimetypes.init()
     mimetypes.types_map['.js'] = 'application/javascript'
 
+    # Define app variables and load&save config
     app['joydance_connections'] = {}
     app['joycons_info'] = {}
+    app['config_handler'] = ConfigHandler(CONFIG_PATHS)
 
     app.on_startup.append(on_startup)
     app.add_routes([

@@ -10,9 +10,29 @@ class WsSubprotocolVersion(Enum):
     V2 = 'v2',
 
 
-WS_SUBPROTOCOLS = {}
-WS_SUBPROTOCOLS[WsSubprotocolVersion.V1.value] = 'v1.phonescoring.jd.ubisoft.com'
-WS_SUBPROTOCOLS[WsSubprotocolVersion.V2.value] = 'v2.phonescoring.jd.ubisoft.com'
+WS_SUBPROTOCOLS = {
+    WsSubprotocolVersion.V1.value: 'v1.phonescoring.jd.ubisoft.com',
+    WsSubprotocolVersion.V2.value: 'v2.phonescoring.jd.ubisoft.com',
+}
+
+
+class WsCommand(Enum):
+    GET_JOYCON_LIST = 'get_joycon_list'
+    CONNECT_JOYCON = 'connect_joycon'
+    DISCONNECT_JOYCON = 'disconnect_joycon'
+    UPDATE_JOYCON_STATE = 'update_joycon_state'
+    SEARCH_INPUT = 'search_input'
+    SHOW_SEARCH = 'show_search'
+    HIDE_SEARCH = 'hide_search'
+    TOGGLE_RUMBLE = 'toggle_rumble'
+
+
+class PairingMethod(Enum):
+    DEFAULT = 'default'
+    FAST = 'fast'
+    STADIA = 'stadia'
+    OLD = 'old'
+
 
 FRAME_DURATION = 0.015
 SEND_FREQ_MS = 0.05
