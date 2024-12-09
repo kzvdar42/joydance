@@ -177,6 +177,15 @@ async def on_startup(app):
 Open http://localhost:32623 in your browser.
 Running version {JOYDANCE_VERSION}''')
 
+    # Indicate where we read/save configs
+    if app['loaded_cfg_path']:
+        if app['loaded_cfg_path'] == app['saved_cfg_path']:
+            print('Loading & saving config to:', app['loaded_cfg_path'])
+        else:
+            print('Loaded config from:', app['loaded_cfg_path'])
+    if app['saved_cfg_path'] and app['loaded_cfg_path'] != app['saved_cfg_path']:
+        print('Created new config at:', app['saved_cfg_path'])
+
     # Check for update
     async def get_latest_tag_from_api_and_compare(api_endpoint: str) -> bool:
         try:
@@ -305,6 +314,9 @@ if __name__ == '__main__':
     app['joydance_connections'] = {}
     app['joycons_info'] = {}
     app['config_handler'] = ConfigHandler(CONFIG_PATHS)
+    app['loaded_cfg_path'] = app['config_handler'].current_cfg_path
+    app['config_handler'].save_data()
+    app['saved_cfg_path'] = app['config_handler'].current_cfg_path
 
     app.on_startup.append(on_startup)
     app.add_routes([
