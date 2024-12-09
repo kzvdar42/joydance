@@ -40,13 +40,6 @@ ACCEL_ACQUISITION_FREQ_HZ = 200  # Hz
 ACCEL_ACQUISITION_LATENCY = 0  # ms
 ACCEL_MAX_RANGE = 8  # ±G
 
-DEFAULT_CONFIG = {
-    'pairing_method': 'default',
-    'host_ip_addr': '',
-    'console_ip_addr': '',
-    'pairing_code': '',
-}
-
 
 class Command(Enum):
     UP = 3690595578
