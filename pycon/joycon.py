@@ -65,9 +65,9 @@ class JoyCon:
             elif hasattr(hid, "Device"):  # hid
                 _joycon_device = hid.Device(vendor_id, product_id, serial)
             else:
-                raise Exception("Implementation of hid is not recognized!")
+                raise ValueError("Unrecognized HID library implementation. Supported libraries: hidapi or hid")
         except IOError as e:
-            raise IOError('joycon connect failed') from e
+            raise IOError('JoyCon connection failed') from e
         return _joycon_device
 
     def _close(self):

@@ -542,7 +542,7 @@ class JoyDance:
             except:
                 selected_action = ''
             if selected_action:
-                return selected_action.pop('__class'), selected_action
+                return selected_action.pop('__class', None), selected_action
             else:
                 __class = 'ValidateAction_PhoneCommandData'
                 data['rowIndex'] = row_idx
@@ -618,7 +618,7 @@ class JoyDance:
     async def preprocess_command(self, cmd):
         if self.protocol_version == WsSubprotocolVersion.V1:
             return await self.preprocess_command_for_v1(cmd)
-        else:
+        elif self.protocol_version == WsSubprotocolVersion.V2:
             return await self.preprocess_command_for_v2(cmd)
         return None, None
 

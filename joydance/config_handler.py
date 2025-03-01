@@ -75,7 +75,7 @@ class ConfigHandler:
                 elif key.startswith('accel_'):
                     try:
                         val = int(val)
-                    except:
+                    except ValueError:
                         val = new_config[key]
                 validated_config[key] = val
         return validated_config
@@ -107,7 +107,7 @@ class ConfigHandler:
             try:
                 if config_folder:
                     os.makedirs(config_folder, exist_ok=True)
-                with open(config_path, 'w') as fp:
+                with open(config_path, 'w', encoding='utf-8') as fp:
                     self._parser.write(fp)
                 self.current_cfg_path = config_path
                 # save to first path with access
@@ -142,7 +142,6 @@ def get_host_ip() -> str | None:
                 return ip
     except Exception:
         pass
-
     return None
 
 
@@ -159,7 +158,8 @@ def get_datadir() -> str:
 
     if sys.platform == 'win32':
         return os.path.join(home, 'AppData', 'Roaming', app_folder)
-    elif sys.platform == 'linux':
+    if sys.platform == 'linux':
         return os.path.join(home, '.local', 'share', app_folder)
-    elif sys.platform == 'darwin':
+    if sys.platform == 'darwin':
         return os.path.join(home, 'Library', 'Application Support', app_folder)
+    return os.path.join(home, app_folder)

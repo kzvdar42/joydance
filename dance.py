@@ -30,7 +30,6 @@ CONFIG_PATHS = [
 
 async def get_device_ids():
     devices = hid.enumerate(JOYCON_VENDOR_ID, 0)
-
     out = []
     for device in devices:
         vendor_id = device['vendor_id']
@@ -50,7 +49,6 @@ async def get_device_ids():
             'serial': serial,
             'product_string': product_string,
         })
-
     return out
 
 
@@ -92,7 +90,6 @@ async def get_joycon_list(app):
             app['joycons_info'][dev['serial']] = info
 
         joycons.append(info)
-
     return sorted(joycons, key=lambda x: (x['name'], x['color'], x['serial']))
 
 
@@ -199,7 +196,7 @@ Running version {JOYDANCE_VERSION}''')
                     # parse from list of tags
                     latest_version = json_body[0]['name'][1:]
                 if JOYDANCE_VERSION != latest_version:
-                    print('\033[93m{}\033[00m'.format('Version {} is available: https://github.com/kzvdar42/joydance'.format(latest_version)))
+                    print('\033[93m{}\033[00m'.format(f'Version {latest_version} is available: https://github.com/kzvdar42/joydance'))
                 return True
         except:
             return False
@@ -214,7 +211,7 @@ Running version {JOYDANCE_VERSION}''')
 
 async def html_handler(request):
     config = request.app['config_handler'].data
-    with open(get_static_path('static/index.html'), 'r') as f:
+    with open(get_static_path('static/index.html'), 'r', encoding='utf-8') as f:
         html = f.read()
         html = html.replace('[[CONFIG]]', json.dumps(config))
         html = html.replace('[[VERSION]]', JOYDANCE_VERSION)
@@ -304,7 +301,7 @@ def get_static_path(relative_path):
 
 if __name__ == '__main__':
     app = web.Application()
-    # Need to manually set media type mapping for js, as windows has a 
+    # Need to manually set media type mapping for js, as windows has a
     # bug in which it sometimes parses .js files at "text/plain"
     mimetypes.init()
     mimetypes.types_map['.js'] = 'application/javascript'
