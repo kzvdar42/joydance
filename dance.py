@@ -323,4 +323,9 @@ if __name__ == '__main__':
         web.static('/js', get_static_path('static/js')),
     ])
 
-    web.run_app(app, host='localhost', port=32623)
+    web.run_app(
+        app,
+        host='0.0.0.0',
+        port=32623,
+        print=lambda *args: print('======== Running on http://localhost:32623 ========')
+    )
