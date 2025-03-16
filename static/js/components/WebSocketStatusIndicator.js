@@ -1,15 +1,8 @@
-import { h, Component } from '/js/preact.module.js';
-import htm from '/js/htm.module.js';
+import { Component } from '/js/preact.module.js';
+import { html } from '/js/utils.js';
+import { WebSocketState } from '/js/consts.js';
 
-export const html = htm.bind(h);
-
-const WebSocketState = {
-    CONNECTED: 0,
-    DISCONNECTED: 1,
-    RECONNECTING: 2,
-}
-
-class WebSocketStatus extends Component {
+export default class WebSocketStatusIndicator extends Component {
     constructor(props) {
         super(props);
         this.state = {
@@ -40,5 +33,3 @@ class WebSocketStatus extends Component {
         return html`<div class="ws-status">${this.checkWebSocketStatus()}</div>`;
     }
 }
-
-export default WebSocketStatus;

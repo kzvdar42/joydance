@@ -1,7 +1,8 @@
 import { Component } from '/js/preact.module.js';
-import { html, WsCommand } from '/js/app.js';
+import { html } from '/js/utils.js';
+import { WsCommand } from '/js/consts.js';
 
-export default class SearchInput extends Component {
+export default class SearchInputField extends Component {
     constructor(props) {
         super(props)
         this.state = {
