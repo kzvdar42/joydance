@@ -1,6 +1,7 @@
 import { h, Component, render } from '/js/preact.module.js';
 import htm from '/js/htm.module.js';
 import SearchInput from '/js/search_input.js';
+import WebSocketStatus from '/js/websocket_status.js';
 
 // Initialize htm with Preact
 export const html = htm.bind(h);
@@ -373,6 +374,10 @@ class App extends Component {
             pairing_code: window.CONFIG.pairing_code,
             joycons: [],
         }
+        // Websocket settings
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 100;
+        this.reconnectDelay = 2000;
 
         this.connectWs = this.connectWs.bind(this)
         this.sendRequest = this.sendRequest.bind(this)
@@ -456,15 +461,18 @@ class App extends Component {
     }
 
     connectWs() {
+        window.mitty.emit('ws_reconnecting');
         const that = this
         this.socket = new WebSocket('ws://' + window.location.host + '/ws')
 
-        this.socket.onopen = function(e) {
+        this.socket.onopen = (event) => {
             console.log('[open] Connection established')
             that.requestGetJoyconList()
+            window.mitty.emit('ws_connected');
+            this.reconnectAttempts = 0;
         }
 
-        this.socket.onmessage = function(event) {
+        this.socket.onmessage = (event) => {
             const msg = JSON.parse(event.data)
             console.log('Received WebSocket message:', msg)
             const cmd = msg['cmd']
@@ -489,16 +497,35 @@ class App extends Component {
             }
         }
 
-        this.socket.onclose = function(event) {
+        this.socket.onclose = (event) => {
             if (event.wasClean) {
                 console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
             } else {
                 console.log('[close] Connection died');
             }
+            window.mitty.emit('ws_disconnected');
+            this.scheduleReconnect();
         }
 
-        this.socket.onerror = function(error) {
+        this.socket.onerror = (error) => {
             console.log(`[error] ${error.message}`);
+            window.mitty.emit('ws_disconnected');
+            this.scheduleReconnect();
+        }
+    }
+
+    scheduleReconnect() {
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            let delay = this.reconnectDelay;
+            // let delay = this.reconnectDelay * (2 ** this.reconnectAttempts); // Exponential backoff
+            console.log(`Reconnecting in ${delay / 1000} seconds...`);
+
+            setTimeout(() => {
+                this.reconnectAttempts++;
+                this.connectWs();
+            }, delay);
+        } else {
+            console.warn('Max reconnect attempts reached. Stopping.');
         }
     }
 
@@ -535,6 +562,10 @@ class App extends Component {
 ▓▓   ▓▓ ▓▓    ▓▓    ▓▓    ▓▓   ▓▓ ▓▓   ▓▓ ▓▓  ▓▓ ▓▓ ▓▓      ▓▓
  █████   ██████     ██    ██████  ██   ██ ██   ████  ██████ ███████
                     </pre>
+                </div>
+
+                <div onClick=${this.connectWs}>
+                    <${WebSocketStatus} />
                 </div>
 
                 <form class="pure-form pure-form-stacked">
