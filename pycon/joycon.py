@@ -2,15 +2,18 @@ import time
 from threading import Thread
 from typing import Optional, Tuple
 import math
+import logging
 
 import hid
 
 from .constants import (JOYCON_L_PRODUCT_ID, JOYCON_PRODUCT_IDS,
                         JOYCON_R_PRODUCT_ID, JOYCON_VENDOR_ID)
 
+
+logger = logging.getLogger(__name__)
+
+
 # TODO: disconnect, power off sequence
-
-
 class JoyCon:
     _INPUT_REPORT_SIZE = 49
     _INPUT_REPORT_PERIOD = 0.015
@@ -107,9 +110,11 @@ class JoyCon:
 
     def _write_output_report(self, command, subcommand, argument):
         if not self._joycon_device:
+            logger.debug("%s: Wanted to write output report, but JoyCon is not connected", self.serial)
             return
 
         # TODO: add documentation
+        logger.debug("%s: JoyCon writing output report: %s", self.serial, self._rumble_data != JoyCon._RUMBLE_DATA)
         self._joycon_device.write(b''.join([
             command,
             self._packet_number.to_bytes(1, byteorder='little'),
@@ -164,21 +169,21 @@ class JoyCon:
                 # Call input hooks in a different thread
                 Thread(target=self._input_hook_caller, daemon=True).start()
             except OSError:
-                print(f'connection lost to {self.serial}')
+                logger.debug("%s: connection lost to hid device", self.serial)
                 self._joycon_device = None
                 time.sleep(self.reconnect_timeout)  # Wait before attempting reconnection
-            except Exception as e:
-                print(f'Error in input report thread for {self.serial}: {e}')
+            except Exception:
+                logger.exception("%s: Error in input report:", self.serial, exc_info=True)
                 time.sleep(2)
 
     def _attempt_reconnect(self):
         """Attempt to reconnect to the JoyCon"""
         try:
-            print(f'attempting to reconnect to {self.serial}...')
+            logger.debug("%s: attempting to reconnect to hid device", self.serial)
             self._connect()
-            print(f'reconnected successfully to {self.serial}')
-        except Exception as e:
-            print(f'reconnection failed to {self.serial}: {e}')
+            logger.debug("%s: reconnected successfully to hid device", self.serial)
+        except Exception:
+            logger.debug("%s: failed reconnecting to hid device", self.serial, exc_info=True)
             time.sleep(self.reconnect_timeout)  # Wait before next attempt
 
     def _input_hook_caller(self):
@@ -197,12 +202,10 @@ class JoyCon:
 
         # user IME data
         if self._spi_flash_read(0x8026, 2) == b"\xB2\xA1":
-            # print(f"Calibrate {self.serial} IME with user data")
             imu_cal = self._spi_flash_read(0x8028, 24)
 
         # factory IME data
         else:
-            # print(f"Calibrate {self.serial} IME with factory data")
             imu_cal = self._spi_flash_read(0x6020, 24)
 
         self.set_accel_calibration((
@@ -512,28 +515,28 @@ class JoyCon:
         # Clamp values to valid ranges
         frequency = max(40.875885, min(1252.572266, frequency))
         amplitude = max(0.0, min(1.0, amplitude))
-        
+
         # Encode frequency
         freq_encoded = int(round(math.log2(frequency/10.0)*32.0))
         freq_data = bytes([
             ((freq_encoded >> 8) & 0xFF) + 0x40, 
             freq_encoded & 0xFF
         ])
-        
+
         # Encode amplitude
         amp_encoded = int(round(amplitude * 100))
         amp_data = bytes([
             (amp_encoded << 1) & 0xFF,
             0x40
         ])
-        
+
         # Combine data for both motors (HD and LRA)
         return amp_data + freq_data + amp_data + freq_data
 
     @property
     def rumble_enabled(self):
         return self._rumble_enabled
-    
+
     @rumble_enabled.setter
     def rumble_enabled(self, enabled):
         if not enabled:
@@ -547,6 +550,7 @@ class JoyCon:
             frequency (float): Frequency in Hz (40.875885-1252.572266)
             amplitude (float): Amplitude from 0.0 to 1.0
         """
+        logger.debug("JoyCon rumble: %s %s %s", self.rumble_enabled, frequency, amplitude)
         if not self.rumble_enabled:
             return
 

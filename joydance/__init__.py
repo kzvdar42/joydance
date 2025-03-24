@@ -3,9 +3,9 @@ from collections import defaultdict
 import json
 import random
 import socket
+import logging
 import ssl
 import time
-import traceback
 from enum import Enum
 from urllib.parse import urlparse
 
@@ -16,6 +16,9 @@ from .constants import (ACCEL_ACQUISITION_FREQ_HZ, ACCEL_ACQUISITION_LATENCY,
                         ACCEL_MAX_RANGE, FRAME_DURATION, SHORTCUT_MAPPING,
                         UBI_APP_ID, UBI_SKU_ID, WS_SUBPROTOCOLS, Command,
                         JoyConButton, WsSubprotocolVersion)
+
+
+logger = logging.getLogger("joydance")
 
 
 class PairingState(Enum):
@@ -227,15 +230,15 @@ class JoyDance:
             # Accept incoming connection from console
             console_conn, addr = conn.accept()
             self.console_conn = console_conn
-            print('Connected with {}:{}'.format(addr[0], addr[1]))
+            logger.debug('%s: Accepted connection from %s:%s', self.joycon.serial, addr[0], addr[1])
         except Exception as e:
             await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_HOLE_PUNCHING.value})
             raise e
 
     async def send_message(self, __class, data={}):
         ''' Send JSON message to server '''
-        # if __class != 'JD_PhoneScoringData':
-        #    print('>>>', __class, data)
+        if __class != 'JD_PhoneScoringData':
+           logger.debug('%s: >>> %s %s', self.joycon.serial, __class, data)
 
         msg = {'root': {'__class': __class}}
         if data:
@@ -250,6 +253,7 @@ class JoyDance:
 
     async def set_rumble_enabled(self, enabled):
         self.joycon.rumble_enabled = enabled
+        logger.debug('JoyDance set_rumble_enabled %s == %s', enabled, self.joycon.rumble_enabled)
         await self.on_state_changed(self.joycon.serial, {'rumble_enabled': enabled})
         if enabled:
             # Give a little buzz to indicate that rumble is enabled
@@ -318,16 +322,27 @@ class JoyDance:
         message = json.loads(message)
         # don't print data from UI setup data (too big)
         if message.get('__class') != 'JD_PhoneUiSetupData':
-            print('<<<', self.profile_data.get('player_id'), message)
+            logger.debug(
+                '%s-%d: <<< %s',
+                self.joycon.serial,
+                self.profile_data.get('player_id', -1),
+                message,
+            )
         else:
-            print(
-                '<<<',
-                self.profile_data.get('player_id'),
-                'JD_PhoneUiSetupData',
+            # logger.debug(
+            #     '%s-%d: <<< %s',
+            #     self.joycon.serial,
+            #     self.profile_data.get('player_id', -1),
+            #     message,
+            # )
+            logger.debug(
+                '%s-%d: <<< JD_PhoneUiSetupData isPopup=%s inputSetup=%s setupData=%s keys=%s',
+                self.joycon.serial,
+                self.profile_data.get('player_id', -1),
                 message.get('isPopup'),
                 message.get('inputSetup'),
                 message.get('setupData'),
-                message.keys()
+                message.keys(),
             )
 
         __class = message['__class']
@@ -368,8 +383,8 @@ class JoyDance:
                 if item['__class'] == 'JD_PhoneAction_Shortcut':
                     try:
                         shortcuts.add(Command(item['shortcutType']))
-                    except Exception as e:
-                        print('Unknown Command: ', e)
+                    except KeyError:
+                        logger.exception('Unknown Shortcut: %s', item['shortcutType'])
             self.available_shortcuts = shortcuts
         elif __class == 'JD_OpenPhoneKeyboard_ConsoleCommandData':
             self.is_search_opened = True
@@ -394,7 +409,7 @@ class JoyDance:
         await self.on_game_message(message)
 
     async def send_hello(self):
-        print('Pairing...')
+        logger.debug('%s: Pairing...', self.joycon.serial)
 
         await self.send_message('JD_PhoneDataCmdHandshakeHello', {
             'accelAcquisitionFreqHz': float(self.accel_acquisition_freq_hz),
@@ -539,6 +554,8 @@ class JoyDance:
             )
             try:
                 selected_action = self.v1_item_actions[row_idx][col_idx][action_idx].copy()
+            except (IndexError, KeyError):
+                logger.exception('Failed to get selected action')
                 selected_action = ''
             if selected_action:
                 return selected_action.pop('__class', None), selected_action
@@ -674,11 +691,12 @@ class JoyDance:
 
                 # Send command to server
                 if cmd:
+                    logger.debug('%s: raw cmd: %s', self.joycon.serial, cmd)
                     try:
                         __class, data = await self.preprocess_command(cmd)
+                        logger.debug('%s: preprocessed cmd: %s %s', self.joycon.serial, __class, data)
                     except Exception:
-                        print(f"An error occurred while processing command for {self.joycon.serial}.")
-                        print(traceback.format_exc())
+                        logger.exception("%s: An error occurred while processing command.", self.joycon.serial)
                         continue
                     # if __class is None, it means the command is not allowed to be sent
                     if __class is None:
@@ -686,12 +704,12 @@ class JoyDance:
 
                     # Only send input when it's allowed to, otherwise we might get a disconnection
                     if self.is_input_allowed:
-                        # print(f'>>> {__class} {data}')
+                        logger.debug('%s: >>> %s %s', self.joycon.serial, __class, data)
                         await self.send_message(__class, data)
                         # TODO: maybe add to configuration?
                         await asyncio.sleep(FRAME_DURATION * 30)
             except Exception:
-                traceback.print_exc()
+                logger.exception("%s: An error occurred while sending command.", self.joycon.serial)
                 await self.disconnect()
 
     async def connect_ws(self):
@@ -739,12 +757,12 @@ class JoyDance:
                     await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_CONSOLE_CONNECTION.value})
                     await self.disconnect(close_ws=False)
         except Exception:
-            traceback.print_exc()
+            logger.exception("%s: An error occurred while connecting to console.", self.joycon.serial)
             await self.on_state_changed(self.joycon.serial, {'state': PairingState.ERROR_CONSOLE_CONNECTION.value})
             await self.disconnect(close_ws=False)
 
     async def disconnect(self, close_ws=True):
-        print('disconnected')
+        logger.debug('%s: Disconnected', self.joycon.serial)
         self.disconnected = True
         await self.on_state_changed(self.joycon.serial, {'state': PairingState.DISCONNECTED.value})
         # Don't fully delete the joycon, just close it
@@ -761,25 +779,28 @@ class JoyDance:
         """Attempts to reconnect to the JoyCon periodically"""
         retry_delay = 1  # Start with 1 second delay
         max_delay = 30   # Maximum delay between attempts
-        
+
         while self.should_reconnect:
             try:
                 # Attempt to reconnect the joycon
                 await self.joycon.reconnect()
-                
+
                 if self.joycon.is_connected():
-                    print("JoyCon reconnected successfully")
+                    logger.debug('%s: Reconnected', self.joycon.serial)
                     self.disconnected = False
                     self.reconnection_task = None
-                    
+
                     # Restart the main connection flow
-                    await self.on_state_changed(self.joycon.serial, {'state': PairingState.IDLE.value})
+                    await self.on_state_changed(
+                        self.joycon.serial,
+                        {'state': PairingState.IDLE.value},
+                    )
                     asyncio.create_task(self.pair())
                     return
-                
-            except Exception as e:
-                print(f"Reconnection attempt failed: {e}")
-                
+
+            except Exception:
+                logger.exception('%s: Reconnection attempt failed', self.joycon.serial)
+
             # Exponential backoff with maximum delay
             await asyncio.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, max_delay)
@@ -796,20 +817,20 @@ class JoyDance:
             if self.console_ip_addr:
                 await self.on_state_changed(self.joycon.serial, {'state': PairingState.CONNECTING.value})
                 if self.protocol_version == WsSubprotocolVersion.V1:
-                    self.pairing_url = 'ws://{}:8080/smartphone'.format(self.console_ip_addr)
+                    self.pairing_url = f'ws://{self.console_ip_addr}:8080/smartphone'
                 else:
-                    self.pairing_url = 'wss://{}:8080/smartphone'.format(self.console_ip_addr)
+                    self.pairing_url = f'wss://{self.console_ip_addr}:8080/smartphone'
             else:
                 await self.on_state_changed(self.joycon.serial, {'state': PairingState.GETTING_TOKEN.value})
-                print('Getting authorication token...')
+                logger.debug('%s: Getting authorication token...', self.joycon.serial)
                 await self.get_access_token()
 
                 await self.on_state_changed(self.joycon.serial, {'state': PairingState.PAIRING.value})
-                print('Sending pairing code...')
+                logger.debug('%s: Sending pairing code...', self.joycon.serial)
                 await self.send_pairing_code()
 
                 await self.on_state_changed(self.joycon.serial, {'state': PairingState.CONNECTING.value})
-                print('Connecting with console...')
+                logger.debug('%s: Connecting with console...', self.joycon.serial)
                 if self.requires_punch_pairing:
                     await self.send_initiate_punch_pairing()
                     await self.hole_punching()
@@ -817,7 +838,7 @@ class JoyDance:
             await self.connect_ws()
         except Exception:
             await self.disconnect()
-            traceback.print_exc()
+            logger.exception("%s: An error occurred while pairing.", self.joycon.serial)
 
     async def parse_carousel_position_setup_data(self, message):
         """
@@ -844,7 +865,7 @@ class JoyDance:
                 try:
                     parsed_action = json.loads(parsed_action)['root']
                 except:
-                    print(f'Failed to parse command: {item_action}')
+                    logger.debug('%s: Failed to parse command: %s', self.joycon.serial, item_action)
                     parsed_action = ''
             item_actions.append(parsed_action)
         return item_actions
@@ -913,5 +934,5 @@ class JoyDance:
                     try:
                         shortcuts_identifiers.add(Command(json.loads(shortcut['command'])['root']['input']))
                     except Exception:
-                        print('Error adding shortcut', shortcut)
+                        logger.exception('%s: Failed to parse shortcut: %s', self.joycon.serial, shortcut)
             self.available_shortcuts = shortcuts_identifiers

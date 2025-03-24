@@ -20,6 +20,7 @@ from pycon import ButtonEventJoyCon, JoyCon
 from pycon.constants import JOYCON_PRODUCT_IDS, JOYCON_VENDOR_ID
 
 logging.getLogger('asyncio').setLevel(logging.WARNING)
+logger = logging.getLogger("dance")
 
 
 CONFIG_PATHS = [
@@ -99,7 +100,7 @@ async def connect_joycon(app, ws, data):
         try:
             await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app['joycons_info'][serial])
         except Exception as e:
-            print(e)
+            logger.error(e)
 
     async def on_game_message(message):
         __class = message.get('__class')
@@ -108,7 +109,7 @@ async def connect_joycon(app, ws, data):
         elif __class == 'JD_CancelKeyboard_ConsoleCommandData':
             await ws_send_response(ws, WsCommand.HIDE_SEARCH, {'serial': serial})
 
-    print(data)
+    logger.debug("connect_joycon: %s", data)
 
     serial = data['joycon_serial']
     product_id = app['joycons_info'][serial]['product_id']
@@ -157,7 +158,7 @@ async def connect_joycon(app, ws, data):
 
 
 async def disconnect_joycon(app, ws, data):
-    print(data)
+    logger.debug("disconnect_joycon: %s", data)
     serial = data['joycon_serial']
     joydance = app['joydance_connections'][serial]
     await joydance.disconnect()
@@ -239,15 +240,15 @@ async def websocket_handler(request):
     await ws.prepare(request)
 
     async for msg in ws:
-        print('got ws msg', msg)
+        logger.debug("got ws msg %s", msg)
         if msg.type == WSMsgType.TEXT:
             try:
                 msg_data = msg.json()
                 cmd = WsCommand(msg_data['cmd'])
                 data = msg_data.get('data', {})
             except (ValueError, KeyError) as e:
-                print(f'Invalid message: {e}')
-                print(f'Message content: {msg.data}')
+                logger.error("Invalid message: %s", e)
+                logger.error("Message content: %s", msg.data)
                 continue
 
             try:
@@ -272,14 +273,14 @@ async def websocket_handler(request):
                 elif cmd == WsCommand.TOGGLE_RUMBLE:
                     await toggle_rumble(request.app, ws, data)
             except Exception as e:
-                print(f"Error handling command {cmd}: {e}")
+                logger.error("Error handling command %s: %s", cmd, e)
                 # Send error response to client
                 await ws_send_response(ws, cmd, {
                     'error': str(e),
                     'status': 'error'
                 })
         elif msg.type == WSMsgType.ERROR:
-            print(f'ws connection closed with exception {ws.exception()}')
+            logger.error('ws connection closed with exception %s', ws.exception())
 
     return ws
 
@@ -300,6 +301,10 @@ def get_static_path(relative_path):
 
 
 if __name__ == '__main__':
+    # set logging level based on --debug flag
+    if len(sys.argv) > 1 and sys.argv[1] == '--debug':
+        logging.basicConfig(level=logging.DEBUG)
+
     app = web.Application()
     # Need to manually set media type mapping for js, as windows has a
     # bug in which it sometimes parses .js files at "text/plain"
