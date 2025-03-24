@@ -11,10 +11,10 @@ import aiohttp
 import hid
 from aiohttp import WSMsgType, web
 
-from joydance import JoyDance, PairingState
+from joydance.joydance_wrapper import JoyDance
 from joydance.config_handler import ConfigHandler, get_datadir
 from joydance.constants import (
-    WsCommand, PairingMethod, JOYDANCE_VERSION, WsSubprotocolVersion
+    WsCommand, PairingMethod, JOYDANCE_VERSION, WsSubprotocolVersion, PairingState
 )
 from pycon import ButtonEventJoyCon, JoyCon
 from pycon.constants import JOYCON_PRODUCT_IDS, JOYCON_VENDOR_ID
@@ -94,7 +94,7 @@ async def get_joycon_list(app):
     return sorted(joycons, key=lambda x: (x['name'], x['color'], x['serial']))
 
 
-async def connect_joycon(app, ws, data):
+async def connect_joycon(app, ws, data) -> None:
     async def on_joydance_state_changed(serial, update_dict):
         app['joycons_info'][serial].update(update_dict)
         try:

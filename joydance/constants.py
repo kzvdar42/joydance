@@ -5,6 +5,23 @@ UBI_APP_ID = '210da0fb-d6a5-4ed1-9808-01e86f0de7fb'
 UBI_SKU_ID = 'jdcompanion-android'
 
 
+class PairingState(Enum):
+    IDLE = 0
+    GETTING_TOKEN = 1
+    PAIRING = 2
+    CONNECTING = 3
+    CONNECTED = 4
+    DISCONNECTING = 5
+    DISCONNECTED = 10
+
+    ERROR_JOYCON = 101
+    ERROR_CONNECTION = 102
+    ERROR_INVALID_PAIRING_CODE = 103
+    ERROR_PUNCH_PAIRING = 104
+    ERROR_HOLE_PUNCHING = 105
+    ERROR_CONSOLE_CONNECTION = 106
+
+
 class WsSubprotocolVersion(Enum):
     V1 = 'v1',
     V2 = 'v2',
@@ -34,7 +51,7 @@ class PairingMethod(Enum):
     OLD = 'old'
 
 
-FRAME_DURATION = 0.015
+FRAME_DURATION = 0.015 # ~60fps
 SEND_FREQ_MS = 0.05
 ACCEL_ACQUISITION_FREQ_HZ = 200  # Hz
 ACCEL_ACQUISITION_LATENCY = 0  # ms

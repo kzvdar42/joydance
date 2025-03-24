@@ -6,51 +6,36 @@ import socket
 import logging
 import ssl
 import time
-from enum import Enum
 from urllib.parse import urlparse
 
 import aiohttp
 import websockets
 
-from .constants import (ACCEL_ACQUISITION_FREQ_HZ, ACCEL_ACQUISITION_LATENCY,
-                        ACCEL_MAX_RANGE, FRAME_DURATION, SHORTCUT_MAPPING,
-                        UBI_APP_ID, UBI_SKU_ID, WS_SUBPROTOCOLS, Command,
-                        JoyConButton, WsSubprotocolVersion)
+from .constants import (
+    ACCEL_ACQUISITION_FREQ_HZ, ACCEL_ACQUISITION_LATENCY,
+    ACCEL_MAX_RANGE, FRAME_DURATION, SHORTCUT_MAPPING,
+    UBI_APP_ID, UBI_SKU_ID, WS_SUBPROTOCOLS, Command,
+    JoyConButton, WsSubprotocolVersion, PairingState
+)
 
 
 logger = logging.getLogger("joydance")
 
 
-class PairingState(Enum):
-    IDLE = 0
-    GETTING_TOKEN = 1
-    PAIRING = 2
-    CONNECTING = 3
-    CONNECTED = 4
-    DISCONNECTING = 5
-    DISCONNECTED = 10
-
-    ERROR_JOYCON = 101
-    ERROR_CONNECTION = 102
-    ERROR_INVALID_PAIRING_CODE = 103
-    ERROR_PUNCH_PAIRING = 104
-    ERROR_HOLE_PUNCHING = 105
-    ERROR_CONSOLE_CONNECTION = 106
-
-
 class JoyDance:
     def __init__(
-            self,
-            joycon,
-            protocol_version,
-            pairing_code=None,
-            host_ip_addr=None,
-            console_ip_addr=None,
-            accel_acquisition_freq_hz=ACCEL_ACQUISITION_FREQ_HZ,
-            accel_acquisition_latency=ACCEL_ACQUISITION_LATENCY,
-            accel_max_range=ACCEL_MAX_RANGE,
-            on_state_changed=None,
-            on_game_message=None):
+        self,
+        joycon,
+        protocol_version,
+        pairing_code=None,
+        host_ip_addr=None,
+        console_ip_addr=None,
+        accel_acquisition_freq_hz=ACCEL_ACQUISITION_FREQ_HZ,
+        accel_acquisition_latency=ACCEL_ACQUISITION_LATENCY,
+        accel_max_range=ACCEL_MAX_RANGE,
+        on_state_changed=None,
+        on_game_message=None
+    ):
         self.joycon = joycon
         self.joycon_is_left = joycon.is_left()
         self.protocol_version = protocol_version
