@@ -538,8 +538,7 @@ class JoyDance:
                 self.v1_row_num, self.v1_col_num_per_row_id[self.v1_row_num], self.v1_action_id
             )
             try:
-                selected_action = self.v1_item_actions[row_idx][col_idx][action_idx]
-            except:
+                selected_action = self.v1_item_actions[row_idx][col_idx][action_idx].copy()
                 selected_action = ''
             if selected_action:
                 return selected_action.pop('__class', None), selected_action
