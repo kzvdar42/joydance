@@ -7,18 +7,20 @@ import sys
 from .constants import PairingMethod
 
 
-REGEX_PAIRING_CODE = re.compile(r'^\d{6}$')
-REGEX_LOCAL_IP_ADDRESS = re.compile(r'^(192\.168|10.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]))\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$')
+REGEX_PAIRING_CODE = re.compile(r"^\d{6}$")
+REGEX_LOCAL_IP_ADDRESS = re.compile(
+    r"^(192\.168|10.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]))\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$"
+)
 
 
 class ConfigHandler:
     """Config file handler."""
 
     DEFAULT_CONFIG = {
-        'pairing_method': 'default',
-        'host_ip_addr': '',
-        'console_ip_addr': '',
-        'pairing_code': '',
+        "pairing_method": "default",
+        "host_ip_addr": "",
+        "console_ip_addr": "",
+        "pairing_code": "",
     }
 
     def __init__(self, cfg_paths: list[str] | str):
@@ -40,19 +42,17 @@ class ConfigHandler:
 
     @staticmethod
     def is_new_config_valid(new_config) -> bool:
-        if not is_valid_pairing_method(new_config['pairing_method']):
+        if not is_valid_pairing_method(new_config["pairing_method"]):
             return False
 
-        if new_config['pairing_method'] == PairingMethod.DEFAULT.value:
-            if (
-                not is_valid_ip_address(new_config['host_ip_addr'])
-                or not is_valid_pairing_code(new_config['pairing_code'])
+        if new_config["pairing_method"] == PairingMethod.DEFAULT.value:
+            if not is_valid_ip_address(new_config["host_ip_addr"]) or not is_valid_pairing_code(
+                new_config["pairing_code"]
             ):
                 return False
 
-        if (
-            new_config['pairing_method'] == PairingMethod.FAST.value
-            and not is_valid_ip_address(new_config['console_ip_addr'])
+        if new_config["pairing_method"] == PairingMethod.FAST.value and not is_valid_ip_address(
+            new_config["console_ip_addr"]
         ):
             return False
         return True
@@ -63,16 +63,16 @@ class ConfigHandler:
         for key in validated_config:
             if key in new_config:
                 val = new_config[key]
-                if key == 'pairing_method':
+                if key == "pairing_method":
                     if not is_valid_pairing_method(val):
                         val = PairingMethod.DEFAULT.value
-                elif key == 'host_ip_addr' or key == 'console_ip_addr':
+                elif key == "host_ip_addr" or key == "console_ip_addr":
                     if not is_valid_ip_address(val):
-                        val = ''
-                elif key == 'pairing_code':
+                        val = ""
+                elif key == "pairing_code":
                     if not is_valid_pairing_code(val):
-                        val = ''
-                elif key.startswith('accel_'):
+                        val = ""
+                elif key.startswith("accel_"):
                     try:
                         val = int(val)
                     except ValueError:
@@ -86,28 +86,26 @@ class ConfigHandler:
         # Save the first successful path
         if files_read:
             self.current_cfg_path = files_read[0]
-        if 'joydance' not in self._parser:
-            self._parser['joydance'] = self.DEFAULT_CONFIG
+        if "joydance" not in self._parser:
+            self._parser["joydance"] = self.DEFAULT_CONFIG
         else:
-            self._parser['joydance'] = self.validate_new_config(
-                self._parser['joydance']
-            )
+            self._parser["joydance"] = self.validate_new_config(self._parser["joydance"])
 
-        if not self._parser['joydance']['host_ip_addr']:
+        if not self._parser["joydance"]["host_ip_addr"]:
             host_ip_addr = get_host_ip()
             if host_ip_addr:
-                self._parser['joydance']['host_ip_addr'] = host_ip_addr
-        return dict(self._parser['joydance'])
+                self._parser["joydance"]["host_ip_addr"] = host_ip_addr
+        return dict(self._parser["joydance"])
 
     def save_data(self):
         self.current_cfg_path = None
-        self._parser['joydance'] = self._data
+        self._parser["joydance"] = self._data
         for config_path in self.cfg_paths:
             config_folder = os.path.dirname(config_path)
             try:
                 if config_folder:
                     os.makedirs(config_folder, exist_ok=True)
-                with open(config_path, 'w', encoding='utf-8') as fp:
+                with open(config_path, "w", encoding="utf-8") as fp:
                     self._parser.write(fp)
                 self.current_cfg_path = config_path
                 # save to first path with access
@@ -138,7 +136,7 @@ def is_valid_pairing_method(val: str) -> bool:
 def get_host_ip() -> str | None:
     try:
         for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if ip.startswith('192.168') or ip.startswith('10.'):
+            if ip.startswith("192.168") or ip.startswith("10."):
                 return ip
     except Exception:
         pass
@@ -153,13 +151,13 @@ def get_datadir() -> str:
     # macOS: ~/Library/Application Support
     # windows: C:/Users/<USER>/AppData/Roaming
     """
-    home = os.path.expanduser('~')
-    app_folder = 'JoyDance'
+    home = os.path.expanduser("~")
+    app_folder = "JoyDance"
 
-    if sys.platform == 'win32':
-        return os.path.join(home, 'AppData', 'Roaming', app_folder)
-    if sys.platform == 'linux':
-        return os.path.join(home, '.local', 'share', app_folder)
-    if sys.platform == 'darwin':
-        return os.path.join(home, 'Library', 'Application Support', app_folder)
+    if sys.platform == "win32":
+        return os.path.join(home, "AppData", "Roaming", app_folder)
+    if sys.platform == "linux":
+        return os.path.join(home, ".local", "share", app_folder)
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", app_folder)
     return os.path.join(home, app_folder)

@@ -1,0 +1,51 @@
+from abc import ABC
+import random
+import socket
+import logging
+
+from joydance.constants import PairingState
+
+logger = logging.getLogger(__name__)
+
+
+class AbstractGameWrapper(ABC):
+
+    def __init__(
+        self,
+        on_state_changed=None,
+        on_game_message=None,
+    ):
+        if on_state_changed:
+            self.on_state_changed = on_state_changed
+        if on_game_message:
+            self.on_game_message = on_game_message
+
+    @staticmethod
+    async def on_state_changed(state):  # pylint: disable=method-hidden
+        pass
+
+    async def on_game_message(self, message):  # pylint: disable=method-hidden
+        pass
+
+    def set_rumble(self, enabled):
+        self.controller.set_rumble(enabled)
+
+    def get_random_port(self):
+        """Randomize a port number, to be used in hole_punching() later"""
+        return random.randrange(39000, 39999)
+
+    async def hole_punching(self):
+        """Open a port on this machine so the console can connect to it."""
+        try:
+            conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            conn.settimeout(10)
+            conn.bind(("0.0.0.0", self.host_port))
+            conn.listen(5)
+
+            # Accept incoming connection from console
+            console_conn, addr = conn.accept()
+            self.console_conn = console_conn
+            logger.debug("Accepted connection from %s:%s", addr[0], addr[1])
+        except Exception as e:
+            await self.on_state_changed({"state": PairingState.ERROR_HOLE_PUNCHING.value})
+            raise e
