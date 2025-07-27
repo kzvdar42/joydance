@@ -130,7 +130,7 @@ class JoyConWrapper(AbstractControllerWrapper):
 
     def is_connected(self):
         """Checks if the JoyCon is currently connected."""
-        return self.joycon.is_connected()
+        return self.joycon.is_connected.is_set()
 
     def is_left(self):
         """Checks if the JoyCon is a left JoyCon."""

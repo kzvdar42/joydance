@@ -49,7 +49,9 @@ class JoyCon:
         self._packet_number = 0
         self.set_accel_calibration((0, 0, 0), (1, 1, 1))
 
+        self.is_connected = threading.Event()
         self._connect()
+        self.is_connected.wait()
 
     def _connect(self):
         """Handle the connection process"""
@@ -86,15 +88,6 @@ class JoyCon:
                 self._close()
         except Exception:
             pass
-
-    def is_connected(self):
-        """Checks if the JoyCon is currently connected"""
-        try:
-            # Attempt to get status as a connection test
-            self.get_status()
-            return True
-        except Exception:
-            return False
 
     async def reconnect(self):
         """Attempts to reconnect to the JoyCon"""
@@ -165,11 +158,13 @@ class JoyCon:
                     report = self._read_input_report()
 
                 self._input_report = report
+                self.is_connected.set()
 
                 # Call input hooks in a different thread
                 Thread(target=self._input_hook_caller, daemon=True).start()
             except OSError:
                 logger.debug("%s: connection lost to hid device", self.serial)
+                self.is_connected.clear()
                 self._joycon_device = None
                 time.sleep(self.reconnect_timeout)  # Wait before attempting reconnection
             except Exception:
