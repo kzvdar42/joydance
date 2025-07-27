@@ -55,7 +55,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.available_shortcuts = set()
         self.accel_data = []
         self.ws = None
-        self.disconnected = False
+        self.is_connected = False
         self.headers = {
             "Ubi-AppId": UBI_APP_ID,
             "X-SkuId": UBI_SKU_ID,
@@ -157,7 +157,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self.disconnect(close_ws=False)
 
     async def collect_accelerometer_data(self):
-        if self.disconnected:
+        if not self.is_connected:
             return
         if not self.should_start_accelerometer:
             self.accel_data = []
@@ -208,10 +208,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             logger.debug(
                 "%s: Tick %s %s",
                 self.controller.serial,
-                self.disconnected,
+                self.is_connected,
                 self.should_start_accelerometer,
             )
-            if self.disconnected:
+            if not self.is_connected:
                 break
             if not self.should_start_accelerometer:
                 frames = 0
@@ -238,11 +238,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             },
         )
 
-    async def disconnect(self, close_ws=True):
-        if self.disconnected:
+        if not self.is_connected:
             return
         logger.debug("%s: Disconnected", self.controller.serial)
-        self.disconnected = True
+        self.is_connected = False
         await self.on_state_changed(self.controller.serial, {"state": PairingState.DISCONNECTED.value})
         self.controller.close()
         if close_ws and self.ws and not self.ws.closed:
@@ -254,12 +253,12 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     async def attempt_reconnect(self):
         retry_delay = 1
         max_delay = 30
-        while self.should_reconnect and self.disconnected:
+        while self.should_reconnect and not self.is_connected:
             try:
                 if self.controller.reconnect():
                     if self.controller.is_connected():
                         logger.debug("%s: Reconnected JoyCon", self.controller.serial)
-                        self.disconnected = False
+                        self.is_connected = True
                         self.reconnection_task = None
                         await self.on_state_changed(
                             self.controller.serial,
@@ -387,7 +386,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
     async def send_command(self):
         while True:
-            if self.disconnected:
+            if not self.is_connected:
                 return
             try:
                 await asyncio.sleep(FRAME_DURATION)

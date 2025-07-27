@@ -232,7 +232,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 ),
             ) as websocket:
                 self.ws = websocket
-                self.disconnected = False
+                self.is_connected = True
                 await self.on_state_changed(
                     self.controller.serial, {"state": PairingState.CONNECTED.value}
                 )
@@ -290,7 +290,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
 
     async def pair(self):
         try:
-            self.disconnected = False
+            self.is_connected = False
             self.should_reconnect = True
 
             if self.console_ip_addr:

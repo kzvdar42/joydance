@@ -66,8 +66,7 @@ class JoyDance:
 
     def is_connected_to_game(self):
         """Checks if currently connected to the game."""
-        # Assuming disconnected is a boolean attribute in game_handler
-        return not self.game_handler.disconnected
+        return not self.game_handler.is_connected
 
     def set_rumble(self, rumble_enabled: bool):
         """Enables or disables rumble on the controller."""
