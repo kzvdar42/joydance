@@ -1,5 +1,6 @@
 from .abstract_game_wrapper import AbstractGameWrapper
 import asyncio
+import aiohttp
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -74,7 +75,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "Ubi-RequestedPlatformType": "ubimobile",
             "Content-Type": "application/json",
         }
-        import aiohttp
 
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.post(
@@ -93,7 +93,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
     async def send_pairing_code(self):
         url = "https://prod.just-dance.com/sessions/v1/pairing-info"
-        import aiohttp
 
         async with aiohttp.ClientSession(headers=self.headers) as session:
             async with session.get(url, params={"code": self.pairing_code}, ssl=False) as resp:
@@ -118,7 +117,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "mobileIP": self.host_ip_addr,
             "mobilePort": self.host_port,
         }
-        import aiohttp
 
         async with aiohttp.ClientSession(headers=self.headers) as session:
             async with session.post(url, json=json_payload, ssl=False) as resp:

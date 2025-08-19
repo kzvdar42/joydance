@@ -136,7 +136,7 @@ async def connect_joycon(app, ws, data) -> None:
     config["console_ip_addr"] = console_ip_addr
     app["config_handler"].data = config
 
-    if pairing_method == PairingMethod.DEFAULT.value or pairing_method == PairingMethod.STADIA.value:
+    if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
         app["joycons_info"][serial]["pairing_code"] = pairing_code
         console_ip_addr = None
     else:
