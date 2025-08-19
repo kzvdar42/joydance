@@ -172,7 +172,7 @@ async def disconnect_joycon(app, ws, data):
     logger.debug("disconnect_joycon: %s", data)
     serial = data["joycon_serial"]
     joydance = app["joydance_connections"][serial]
-    await joydance.disconnect()
+    await joydance.disconnect(should_reconnect=False)
 
 
 async def on_startup(app):
