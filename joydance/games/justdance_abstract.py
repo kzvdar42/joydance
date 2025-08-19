@@ -236,6 +236,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             },
         )
 
+    async def disconnect(self, close_ws = True, should_reconnect = True):
+        self.should_reconnect = should_reconnect
         if not self.is_connected:
             return
         logger.debug("%s: Disconnected", self.controller.serial)
