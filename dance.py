@@ -6,6 +6,7 @@ import time
 import os
 import sys
 import mimetypes
+import argparse
 
 import aiohttp
 import hid
@@ -329,10 +330,23 @@ def get_static_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
+def get_args():
+    parser = argparse.ArgumentParser(prog="JoyDance")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--logs_filepath", default=None, help="Path to save logs to")
+
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    # set logging level based on --debug flag
-    if len(sys.argv) > 1 and sys.argv[1] == "--debug":
-        logging.basicConfig(level=logging.DEBUG)
+    args = get_args()
+
+    # Set up logging
+    logging_level = logging.DEBUG if args.debug else logging.INFO
+    logging_handlers = [logging.StreamHandler()]
+    if args.logs_filepath:
+        logging_handlers.append(logging.FileHandler(args.logs_filepath))
+    logging.basicConfig(handlers=logging_handlers, level=logging_level)
 
     app = web.Application()
     # Need to manually set media type mapping for js, as windows has a
