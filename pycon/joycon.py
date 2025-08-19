@@ -558,6 +558,21 @@ class JoyCon:
         self._rumble_data = self._RUMBLE_DATA
         self._write_output_report(b'\x10', b'\x00', b'\x00')
 
+    def set_player_lamp_on(self, on_pattern: int):
+        self._write_output_report(
+            b'\x01', b'\x30',
+            (on_pattern & 0xF).to_bytes(1, byteorder='little'))
+
+    def set_player_lamp_flashing(self, flashing_pattern: int):
+        self._write_output_report(
+            b'\x01', b'\x30',
+            ((flashing_pattern & 0xF) << 4).to_bytes(1, byteorder='little'))
+
+    def set_player_lamp(self, pattern: int):
+        self._write_output_report(
+            b'\x01', b'\x30',
+            pattern.to_bytes(1, byteorder='little'))
+
 
 if __name__ == '__main__':
     import pyjoycon.device as d
