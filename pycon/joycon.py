@@ -1,5 +1,5 @@
 import time
-from threading import Thread
+import threading
 from typing import Optional, Tuple
 import math
 import logging
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class JoyCon:
     _INPUT_REPORT_SIZE = 49
     _INPUT_REPORT_PERIOD = 0.015
+    _INPUT_READ_TIMEOUT = 100
     _RUMBLE_DATA = b'\x00\x01\x40\x40\x00\x01\x40\x40'
 
     vendor_id: int
@@ -38,29 +39,49 @@ class JoyCon:
         self.product_id = product_id
         self.serial = serial
         self.simple_mode = simple_mode  # TODO: It's for reporting mode 0x3f
-        self._rumble_data = self._RUMBLE_DATA
+
         self._rumble_enabled = True
-        self._should_run = True
+        self._first_connection_timeout = 1
         self.reconnect_timeout = 1
 
         # setup internal state
+        self._rumble_data = self._RUMBLE_DATA
         self._input_hooks = []
         self._input_report = bytes(self._INPUT_REPORT_SIZE)
         self._packet_number = 0
         self.set_accel_calibration((0, 0, 0), (1, 1, 1))
 
+        # connect to joycon
+        self._joycon_device = None
+        self._update_input_report_thread = None
+        self.preconnect_event = threading.Event()
         self.is_connected = threading.Event()
+        self._should_run = threading.Event()
         self._connect()
-        self.is_connected.wait()
 
     def _connect(self):
         """Handle the connection process"""
         # connect to joycon
+        self.preconnect_event.clear()
+        self.is_connected.clear()
         self._joycon_device = self._open(self.vendor_id, self.product_id, serial=self.serial)
-        self._read_joycon_data()
-        self._setup_sensors()
+        # Sleep to allow the device to settle
+        time.sleep(self._first_connection_timeout)
+        while True:
+            try:
+                self._read_joycon_data()
+                self._setup_sensors()
+                break
+            except Exception as e:
+                logger.debug(f"{id(self)} {self.serial}: _connect {e=}")
+                time.sleep(self.reconnect_timeout)
+        self.preconnect_event.set()
+        self._should_run.set()
         # start talking with the joycon in a daemon thread
-        Thread(target=self._update_input_report, daemon=True).start()
+        if self._update_input_report_thread is None:
+            self._update_input_report_thread = threading.Thread(target=self._update_input_report, daemon=True)
+            self._update_input_report_thread.start()
+            self.is_connected.wait()
 
     def _open(self, vendor_id, product_id, serial):
         try:
@@ -82,24 +103,68 @@ class JoyCon:
 
     def close(self):
         """Safely closes the connection without fully deleting the object"""
-        self._should_run = False
+        self._should_run.clear()
         try:
-            if hasattr(self, '_joycon_device') and self._joycon_device:
+            if self._joycon_device:
                 self._close()
         except Exception:
             pass
 
-    async def reconnect(self):
+    def disconnect_device(self):
+        """Safely disconnect the device"""
+        self._should_run.clear()
+        self._write_output_report(b'\x01', b'\x06', b'\x00')
+        self._close()
+
+    def reconnect(self):
         """Attempts to reconnect to the JoyCon"""
         try:
+            logger.debug(f"{id(self)} {self.serial}: reconnecting")
             self._connect()
+            logger.debug(f"{id(self)} {self.serial}: reconnecting done")
             return True
         except Exception:
             return False
 
+    def _update_input_report(self):
+        while self._should_run.is_set():
+            try:
+                self.preconnect_event.wait()
+                if not self._joycon_device:
+                    # Check again if the thread should run
+                    if not self._should_run.is_set():
+                        return
+                    if not self.reconnect():
+                        time.sleep(self.reconnect_timeout)
+                        continue
+
+                report = [0]
+                # TODO, handle input reports of type 0x21 and 0x3f
+                while (len(report) == 0 or report[0] != 0x30) and self._should_run.is_set():
+                    report = self._read_input_report()
+                    if report is None:
+                        raise OSError(f"joycon_device is None! {report=}")
+
+                self._input_report = report
+                self.is_connected.set()
+
+                for callback in self._input_hooks:
+                    callback(self)
+            except OSError:
+                logger.exception("%s %s: connection lost to hid device", id(self), self.serial)
+                self.is_connected.clear()
+                self._joycon_device = None
+                time.sleep(self.reconnect_timeout)
+            except Exception:
+                logger.exception("%s %s: Unexpected error in input report:", id(self), self.serial)
+                time.sleep(self.reconnect_timeout)
+        self._update_input_report_thread = None
+
     def _read_input_report(self) -> bytes:
         if self._joycon_device:
-            return bytes(self._joycon_device.read(self._INPUT_REPORT_SIZE))
+            return bytes(self._joycon_device.read(
+                max_length=self._INPUT_REPORT_SIZE, timeout_ms=self._INPUT_READ_TIMEOUT
+            ))
 
     def _write_output_report(self, command, subcommand, argument):
         if not self._joycon_device:
@@ -107,7 +172,7 @@ class JoyCon:
             return
 
         # TODO: add documentation
-        logger.debug("%s: JoyCon writing output report: %s", self.serial, self._rumble_data != JoyCon._RUMBLE_DATA)
+        logger.debug("%s: JoyCon writing output report is_with_rumble: %s", self.serial, self._rumble_data != JoyCon._RUMBLE_DATA)
         self._joycon_device.write(b''.join([
             command,
             self._packet_number.to_bytes(1, byteorder='little'),
@@ -129,7 +194,6 @@ class JoyCon:
         assert report[1:2] != subcommand, "THREAD carefully"
 
         # TODO: determine if the cut bytes are worth anything
-
         return report[13] & 0x80, report[13:]  # (ack, data)
 
     def _spi_flash_read(self, address, size) -> bytes:
@@ -137,53 +201,13 @@ class JoyCon:
         argument = address.to_bytes(4, "little") + size.to_bytes(1, "little")
         ack, report = self._send_subcmd_get_response(b'\x10', argument)
         if not ack:
-            raise IOError("After SPI read @ {address:#06x}: got NACK")
+            raise IOError(f"After SPI read @ {address:#06x}: got NACK")
 
         if report[:2] != b'\x90\x10':
-            raise IOError("Something else than the expected ACK was recieved!")
+            raise IOError(f"Something else than the expected ACK was recieved! {report}")
         assert report[2:7] == argument, (report[2:5], argument)
 
         return report[7:size + 7]
-
-    def _update_input_report(self):  # daemon thread
-        while self._should_run:
-            try:
-                if not self._joycon_device:
-                    self._attempt_reconnect()
-                    continue
-
-                report = [0]
-                # TODO, handle input reports of type 0x21 and 0x3f
-                while report[0] != 0x30 and self._should_run:
-                    report = self._read_input_report()
-
-                self._input_report = report
-                self.is_connected.set()
-
-                # Call input hooks in a different thread
-                Thread(target=self._input_hook_caller, daemon=True).start()
-            except OSError:
-                logger.debug("%s: connection lost to hid device", self.serial)
-                self.is_connected.clear()
-                self._joycon_device = None
-                time.sleep(self.reconnect_timeout)  # Wait before attempting reconnection
-            except Exception:
-                logger.exception("%s: Error in input report:", self.serial, exc_info=True)
-                time.sleep(2)
-
-    def _attempt_reconnect(self):
-        """Attempt to reconnect to the JoyCon"""
-        try:
-            logger.debug("%s: attempting to reconnect to hid device", self.serial)
-            self._connect()
-            logger.debug("%s: reconnected successfully to hid device", self.serial)
-        except Exception:
-            logger.debug("%s: failed reconnecting to hid device", self.serial, exc_info=True)
-            time.sleep(self.reconnect_timeout)  # Wait before next attempt
-
-    def _input_hook_caller(self):
-        for callback in self._input_hooks:
-            callback(self)
 
     def _read_joycon_data(self):
         color_data = self._spi_flash_read(0x6050, 6)
@@ -198,7 +222,6 @@ class JoyCon:
         # user IME data
         if self._spi_flash_read(0x8026, 2) == b"\xB2\xA1":
             imu_cal = self._spi_flash_read(0x8028, 24)
-
         # factory IME data
         else:
             imu_cal = self._spi_flash_read(0x6020, 24)
@@ -243,12 +266,14 @@ class JoyCon:
         self.stick_cal[5 if self.is_left() else 1] = (buf[8] << 4) | (buf[7] >> 4)
 
     def _setup_sensors(self):
+        logger.debug(f"{self.serial}: _setup_sensors")
         # Enable 6 axis sensors
         self._write_output_report(b'\x01', b'\x40', b'\x01')
         # It needs delta time to update the setting
         time.sleep(0.02)
         # Change format of input report
         self._write_output_report(b'\x01', b'\x03', b'\x30')
+        logger.debug(f"{self.serial}: _setup_sensors done")
 
     @staticmethod
     def _to_int16le_from_2bytes(hbytebe, lbytebe):
@@ -261,7 +286,7 @@ class JoyCon:
         return (byte >> offset_bit) & ((1 << nbit) - 1)
 
     def __del__(self):
-        self._should_run = False
+        self._should_run.clear()
         self._close()
 
     def set_accel_calibration(self, offset_xyz=None, coeff_xyz=None):
@@ -493,12 +518,6 @@ class JoyCon:
             },
             "accel": self.get_accels(),
         }
-
-    def disconnect_device(self):
-        """Safely disconnect the device"""
-        self._should_run = False
-        self._write_output_report(b'\x01', b'\x06', b'\x00')
-        self._close()
 
     def encode_rumble_data(self, frequency=320.0, amplitude=0.0):
         """Encode rumble data for the JoyCon.
