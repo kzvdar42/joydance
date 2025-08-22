@@ -324,7 +324,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self.send_message("JD_PhoneDataCmdSync", {"phoneID": message["phoneID"]})
         elif __class == "JD_ProfilePhoneUiData":
             await self.parse_profile_data(message)
-            await self.on_state_changed(self.controller.serial, self.profile_data)
         elif __class == "JD_PlaySound_ConsoleCommandData":
             sound_index = message.get("soundIndex", 0)
             await self.controller.handle_rumble_on_sound_index(sound_index)
