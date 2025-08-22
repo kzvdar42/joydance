@@ -572,17 +572,3 @@ class JoyCon:
         self._write_output_report(
             b'\x01', b'\x30',
             pattern.to_bytes(1, byteorder='little'))
-
-
-if __name__ == '__main__':
-    import pyjoycon.device as d
-    ids = d.get_L_id() if None not in d.get_L_id() else d.get_R_id()
-
-    if None not in ids:
-        joycon = JoyCon(*ids)
-        lamp_pattern = 0
-        while True:
-            print(joycon.get_status())
-            joycon.set_player_lamp_on(lamp_pattern)
-            lamp_pattern = (lamp_pattern + 1) & 0xf
-            time.sleep(0.2)
