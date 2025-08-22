@@ -71,16 +71,12 @@ async def get_joycon_list(app):
             joycon = JoyCon(dev["vendor_id"], dev["product_id"], dev["serial"])
             # Wait for initial data
             for _ in range(3):
-                time.sleep(0.05)
+                await asyncio.sleep(0.05)
                 battery_level = joycon.get_battery_level()
                 if battery_level > 0:
                     break
 
             color = "#%02x%02x%02x" % joycon.color_body
-
-            # Temporary fix for Windows
-            if platform.system() != "Windows":
-                joycon.__del__()
 
             info = {
                 "vendor_id": dev["vendor_id"],
@@ -94,6 +90,10 @@ async def get_joycon_list(app):
                 "pairing_code": "",
                 "rumble_enabled": joycon.rumble_enabled,
             }
+            # Force delete the joycon object
+            # FIXME: Why just `del joycon` doesn't always call __del__?
+            joycon.__del__()
+            del joycon
 
             app["joycons_info"][dev["serial"]] = info
 
@@ -144,6 +144,7 @@ async def connect_joycon(app, ws, data) -> None:
         app["joycons_info"][serial]["pairing_code"] = ""
 
     raw_joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
+    logger.debug(f"{id(raw_joycon)} {serial}: connect_joycon")
     # Wrap the raw_joycon with JoyConWrapper
     controller = JoyConWrapper(raw_joycon)
 
