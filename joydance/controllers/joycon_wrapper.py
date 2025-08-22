@@ -119,11 +119,10 @@ class JoyConWrapper(AbstractControllerWrapper):
         """Closes the connection to the JoyCon."""
         self.joycon.close()
 
-    async def reconnect(self):
+    def reconnect(self):
         """Attempts to reconnect to the JoyCon."""
         try:
-            await self.joycon.reconnect()
-            return True
+            return self.joycon.reconnect()
         except Exception as e:
             logger.error(f"JoyConWrapper reconnect failed: {e}")
             return False
