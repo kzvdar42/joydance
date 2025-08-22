@@ -208,6 +208,11 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 self.is_connected,
                 self.should_start_accelerometer,
             )
+            # Disconnect if controller is not connected
+            if not self.controller.is_connected():
+                await self.disconnect(should_reconnect=True)
+                return
+            # Break if game is not connected
             if not self.is_connected:
                 break
             if not self.should_start_accelerometer:
