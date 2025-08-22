@@ -203,8 +203,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         frames = 0
         while True:
             logger.debug(
-                "%s: Tick %s %s",
+                "%s %s: Tick controller_is_connected - %s game_is_connected - %s start_accel - %s",
+                id(self.controller),
                 self.controller.serial,
+                self.controller.is_connected(),
                 self.is_connected,
                 self.should_start_accelerometer,
             )
