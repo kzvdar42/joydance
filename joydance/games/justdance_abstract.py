@@ -249,28 +249,25 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
 
     async def attempt_reconnect(self):
-        retry_delay = 1
-        max_delay = 30
-        while self.should_reconnect and not self.is_connected:
+        retry_delay = self.reconnection_start_retry_delay
+        while self.should_reconnect and not self.is_connected and not self.controller.is_connected():
             try:
-                if self.controller.reconnect():
-                    if self.controller.is_connected():
-                        logger.debug("%s: Reconnected JoyCon", self.controller.serial)
-                        self.is_connected = True
-                        self.reconnection_task = None
-                        await self.on_state_changed(
-                            self.controller.serial,
-                            {"state": PairingState.IDLE.value},
-                        )
-                        asyncio.create_task(self.pair())
-                        return
+                # Reconnect controller if it is not connected
+                if not self.controller.is_connected():
+                    is_controller_reconnected = self.controller.reconnect()
+                    # We need controller to be connected to pair with the game
+                    if not is_controller_reconnected:
+                        continue
+                # Pair with the game
+                if not self.is_connected:
+                    asyncio.create_task(self.pair())
             except Exception:
                 logger.exception("%s: Reconnection attempt failed", self.controller.serial)
 
             if not self.should_reconnect:
                 break
             await asyncio.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, max_delay)
+            retry_delay = min(retry_delay * 2, self.reconnection_max_retry_delay)
         self.reconnection_task = None
 
     async def stop_reconnection(self):

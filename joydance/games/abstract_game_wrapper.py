@@ -21,6 +21,8 @@ class AbstractGameWrapper(ABC):
             self.on_game_message = on_game_message
         self.host_port = self.get_random_port()
         self.console_conn = None
+        self.reconnection_start_retry_delay = 1  # seconds
+        self.reconnection_max_retry_delay = 30  # seconds
 
     @staticmethod
     async def on_state_changed(state):  # pylint: disable=method-hidden
