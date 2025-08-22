@@ -19,6 +19,8 @@ class AbstractGameWrapper(ABC):
             self.on_state_changed = on_state_changed
         if on_game_message:
             self.on_game_message = on_game_message
+        self.host_port = self.get_random_port()
+        self.console_conn = None
 
     @staticmethod
     async def on_state_changed(state):  # pylint: disable=method-hidden

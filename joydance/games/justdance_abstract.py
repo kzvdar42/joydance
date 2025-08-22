@@ -44,7 +44,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.pairing_code = pairing_code
         self.host_ip_addr = host_ip_addr
         self.console_ip_addr = console_ip_addr
-        self.host_port = self.get_random_port()
         self.tls_certificate = None
         self.accel_acquisition_freq_hz = accel_acquisition_freq_hz
         self.accel_acquisition_latency = accel_acquisition_latency

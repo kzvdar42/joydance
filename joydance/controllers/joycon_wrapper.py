@@ -13,7 +13,7 @@ class JoyConWrapper(AbstractControllerWrapper):
     def __init__(self, joycon):
         super().__init__()
         self.joycon = joycon
-        self.rumble_enabled = True  # Default to True, can be changed by set_rumble
+        self.rumble_enabled = True
         self._available_shortcuts = set()  # To be updated by game handler
 
     @property
