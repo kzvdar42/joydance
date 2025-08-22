@@ -84,14 +84,14 @@ class JustDanceGameV2(JustDanceGameAbstract):
                     "error_details": str(e),
                 },
             )
-            await self.disconnect(close_ws=False)
+            await self.disconnect()
         except ConnectionRefusedError as e:
             logger.error(f"{self.controller.serial}: V2 Connection refused for {self.pairing_url}: {e}")
             await self.on_state_changed(
                 self.controller.serial,
                 {"state": PairingState.ERROR_CONNECTION.value, "error_details": str(e)},
             )
-            await self.disconnect(close_ws=False)
+            await self.disconnect()
         except Exception as e:
             logger.exception(
                 "%s: V2 An error occurred while connecting WebSocket to console.",
@@ -104,7 +104,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
                     "error_details": str(e),
                 },
             )
-            await self.disconnect(close_ws=True)
+            await self.disconnect()
         finally:
             if "receive_task" in locals() and not receive_task.done():
                 receive_task.cancel()
@@ -120,7 +120,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
             )
         except Exception as e:
             logger.exception("%s: V2 Error in message receive loop.", self.controller.serial)
-            await self.disconnect(close_ws=True)
+            await self.disconnect()
 
     async def pair(self):
         try:

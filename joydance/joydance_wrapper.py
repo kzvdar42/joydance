@@ -52,9 +52,9 @@ class JoyDance:
         """Initiates the pairing process with the game."""
         await self.game_handler.pair()
 
-    async def disconnect(self, close_ws=True):
+    async def disconnect(self, should_reconnect = True):
         """Disconnects from the game."""
-        await self.game_handler.disconnect(close_ws)
+        await self.game_handler.disconnect(should_reconnect)
 
     async def stop_reconnection(self):
         """Stops any ongoing reconnection attempts."""

@@ -148,10 +148,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 self.controller.serial,
                 __class,
             )
-            await self.disconnect(close_ws=False)
+            await self.disconnect()
         except Exception:
             logger.exception("%s: Error sending message: %s", self.controller.serial, __class)
-            await self.disconnect(close_ws=False)
+            await self.disconnect()
 
     async def collect_accelerometer_data(self):
         if not self.is_connected:
@@ -235,17 +235,16 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             },
         )
 
-    async def disconnect(self, close_ws = True, should_reconnect = True):
+    async def disconnect(self, should_reconnect = True):
         self.should_reconnect = should_reconnect
         if not self.is_connected:
             return
+        if self.ws and not self.ws.closed:
+            await self.ws.close()
+        self.ws = None
         logger.debug("%s: Disconnected", self.controller.serial)
         self.is_connected = False
         await self.on_state_changed(self.controller.serial, {"state": PairingState.DISCONNECTED.value})
-        self.controller.close()
-        if close_ws and self.ws and not self.ws.closed:
-            await self.ws.close()
-        self.ws = None
         if self.should_reconnect and not self.reconnection_task:
             self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
 
