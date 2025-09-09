@@ -36,6 +36,7 @@ CONFIG_PATHS = ["config.cfg", os.path.join(get_datadir(), "config.cfg")]
 
 async def get_device_ids():
     devices = hid.enumerate(JOYCON_VENDOR_ID, 0)
+    logger.debug("get_device_ids devices: %s", devices)
     out = []
     for device in devices:
         vendor_id = device["vendor_id"]
@@ -63,6 +64,7 @@ async def get_device_ids():
 async def get_joycon_list(app):
     joycons = []
     devices = await get_device_ids()
+    logger.debug("get_joycon_list devices: %s", devices)
 
     for dev in devices:
         if dev["serial"] in app["joycons_info"]:
@@ -98,6 +100,7 @@ async def get_joycon_list(app):
             app["joycons_info"][dev["serial"]] = info
 
         joycons.append(info)
+    logger.debug("get_joycon_list joycons: %s", joycons)
     return sorted(joycons, key=lambda x: (x["name"], x["color"], x["serial"]))
 
 
@@ -261,7 +264,7 @@ async def toggle_rumble(app, ws, data):
     enabled = data["enabled"]
     if serial in app["joydance_connections"]:
         joydance = app["joydance_connections"][serial]
-        joydance.set_rumble(enabled)  # Changed from set_rumble_enabled, and it's not async
+        joydance.set_rumble(enabled)
         # Update the info for UI
         if serial in app["joycons_info"]:
             app["joycons_info"][serial]["rumble_enabled"] = enabled
