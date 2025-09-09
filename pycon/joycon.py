@@ -143,7 +143,7 @@ class JoyCon:
                 while (len(report) == 0 or report[0] != 0x30) and self._should_run.is_set():
                     report = self._read_input_report()
                     if report is None:
-                        raise OSError(f"joycon_device is None! {report=}")
+                        raise OSError("joycon_device is None!")
 
                 self._input_report = report
                 self.is_connected.set()
