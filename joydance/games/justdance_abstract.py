@@ -333,6 +333,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self.controller.handle_rumble_on_sound_index(sound_index)
         elif __class == "JD_PhoneDataCmdSyncEnd":
             await self.send_message("JD_PhoneDataCmdSyncEnd", {"phoneID": message["phoneID"]})
+            self.is_connected = True
+            await self.on_state_changed(
+                self.controller.serial, {"state": PairingState.CONNECTED.value}
+            )
             await self.on_state_changed(self.controller.serial, {"state": PairingState.CONNECTED.value})
         elif __class == "JD_EnableAccelValuesSending_ConsoleCommandData":
             self.should_start_accelerometer = True

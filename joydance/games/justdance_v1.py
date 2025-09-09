@@ -232,11 +232,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 ),
             ) as websocket:
                 self.ws = websocket
-                self.is_connected = True
-                await self.on_state_changed(
-                    self.controller.serial, {"state": PairingState.CONNECTED.value}
-                )
-
+                # Set state on JD_PhoneDataCmdHandshakeContinue response
                 receive_task = asyncio.create_task(self._message_receive_loop())
 
                 await asyncio.gather(self.send_hello(), self.tick(), self.send_command())
