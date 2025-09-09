@@ -216,7 +216,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 return
             # Break if game is not connected
             if not self.is_connected:
-                break
+                await asyncio.sleep(sleep_duration)
+                continue
             if not self.should_start_accelerometer:
                 frames = 0
                 await asyncio.sleep(sleep_duration)
@@ -392,7 +393,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     async def send_command(self):
         while True:
             if not self.is_connected:
-                return
+                await asyncio.sleep(FRAME_DURATION)
+                continue
             try:
                 await asyncio.sleep(FRAME_DURATION)
                 if not self.is_input_allowed and not self.should_start_accelerometer:
