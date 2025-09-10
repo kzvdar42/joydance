@@ -242,17 +242,35 @@ class JoyCon:
 
     def _read_stick_calibration_data(self):
         user_stick_cal_addr = 0x8012 if self.is_left() else 0x801D
-        buf = self._spi_flash_read(user_stick_cal_addr, 9)
         use_user_data = False
+        buf = None
+        try:
+            buf = self._spi_flash_read(user_stick_cal_addr, 9)
 
-        for b in buf:
-            if b != 0xFF:
-                use_user_data = True
-                break
+            for b in buf:
+                if b != 0xFF:
+                    use_user_data = True
+                    break
+        except Exception as e:
+            logger.warning(f"%s: Error reading user stick calibration data", self.serial)
+            logger.debug(f"%s: Error reading user stick calibration data", self.serial, exc_info=True)
 
-        if not use_user_data:
-            factory_stick_cal_addr = 0x603D if self.is_left() else 0x6046
-            buf = self._spi_flash_read(factory_stick_cal_addr, 9)
+        try:
+            if not use_user_data:
+                factory_stick_cal_addr = 0x603D if self.is_left() else 0x6046
+                buf = self._spi_flash_read(factory_stick_cal_addr, 9)
+        except Exception as e:
+            logger.warning(f"%s: Error reading factory stick calibration data", self.serial)
+            logger.debug(f"%s: Error reading factory stick calibration data", self.serial, exc_info=True)
+
+        if buf is None:
+            # Some Third Party JoyCons don't have stick calibration data
+            # Use values from my JoyCons as fallback
+            if self.is_left():
+                self.stick_cal = [1066, 807, 1943, 2377, 956, 1014]
+            else:
+                self.stick_cal = [1029, 1022, 2176, 1618, 936, 821]
+            return
 
         self.stick_cal = [0] * 6
 
