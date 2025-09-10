@@ -182,13 +182,17 @@ class JoyCon:
         ]))
         self._packet_number = (self._packet_number + 1) & 0xF
 
-    def _send_subcmd_get_response(self, subcommand, argument) -> Tuple[bool, bytes]:
+    def _send_subcmd_get_response(self, subcommand, argument, max_attempts=1000) -> Tuple[bool, bytes]:
         # TODO: handle subcmd when daemon is running
         self._write_output_report(b'\x01', subcommand, argument)
 
         report = [0]
+        num_attempts = 0
         while (len(report) == 0 or report[0] != 0x21):  # TODO, avoid this, await daemon instead
             report = self._read_input_report()
+            num_attempts += 1
+            if num_attempts > max_attempts:
+                raise Exception(f"Timeout reading input report after {max_attempts} attempts")
 
         # TODO, remove, see the todo above
         assert report[1:2] != subcommand, "THREAD carefully"
