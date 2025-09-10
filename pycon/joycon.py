@@ -187,7 +187,7 @@ class JoyCon:
         self._write_output_report(b'\x01', subcommand, argument)
 
         report = [0]
-        while report[0] != 0x21:  # TODO, avoid this, await daemon instead
+        while (len(report) == 0 or report[0] != 0x21):  # TODO, avoid this, await daemon instead
             report = self._read_input_report()
 
         # TODO, remove, see the todo above
