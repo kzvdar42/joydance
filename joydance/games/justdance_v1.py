@@ -223,10 +223,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                     if server_hostname
                     else (
                         urlparse(self.pairing_url).hostname
-                        if not (
-                            self.pairing_url.startswith("ws://192.168.")
-                            or self.pairing_url.startswith("ws://10.")
-                        )
+                        if not self.pairing_url.startswith("ws://")
                         else None
                     )
                 ),

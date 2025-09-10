@@ -39,6 +39,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
             except Exception as e:
                 logger.error(f"{self.controller.serial}: V2 Failed to load TLS certificate: {e}")
 
+        # TODO: handle other private IPs
         if self.pairing_url.startswith("wss://192.168.") or self.pairing_url.startswith("wss://10."):
             if self.console_conn:
                 server_hostname = self.console_conn.getpeername()[0]
