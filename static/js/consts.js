@@ -21,3 +21,10 @@ export const WebSocketState = {
     DISCONNECTED: 1,
     RECONNECTING: 2,
 }
+
+export const IpAddressRegex = {
+    // IP address validation pattern for JavaScript regex
+    JS_PATTERN: /^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/,
+    // IP address validation pattern for HTML pattern attribute (requires double escaping)
+    HTML_PATTERN: "^(\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])\\.(\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])\\.((\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])\\.)(\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])$"
+}

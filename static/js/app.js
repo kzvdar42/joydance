@@ -6,7 +6,7 @@ import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
 import { JoyCons } from '/js/components/joycon.js';
-import { PairingMethod, WsCommand } from '/js/consts.js';
+import { PairingMethod, WsCommand, IpAddressRegex } from '/js/consts.js';
 
 window.mitty = mitt()
 
@@ -77,7 +77,7 @@ class App extends Component {
         const state = this.state
         const pairing_method = state.pairing_method
         let addr = pairing_method == PairingMethod.DEFAULT ? state.host_ip_addr : state.console_ip_addr
-        if (!addr.match(/^(192\.168|10.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]))\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/)) {
+        if (!addr.match(IpAddressRegex.JS_PATTERN)) {
             alert('ERROR: Invalid IP address!')
             document.getElementById('ipAddr').focus()
             return
