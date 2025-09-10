@@ -204,7 +204,7 @@ class JoyCon:
             raise IOError(f"After SPI read @ {address:#06x}: got NACK")
 
         if report[:2] != b'\x90\x10':
-            raise IOError(f"Something else than the expected ACK was recieved! {report}")
+            raise IOError(f"Something else than the expected ACK was received! {report}")
         assert report[2:7] == argument, (report[2:5], argument)
 
         return report[7:size + 7]
