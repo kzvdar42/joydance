@@ -73,7 +73,7 @@ class JoyCon:
                 self._setup_sensors()
                 break
             except Exception as e:
-                logger.debug(f"{id(self)} {self.serial}: _connect {e=}")
+                logger.debug(f"{id(self)} {self.serial}: _connect {e=}", exc_info=True)
                 time.sleep(self.reconnect_timeout)
         self.preconnect_event.set()
         self._should_run.set()
