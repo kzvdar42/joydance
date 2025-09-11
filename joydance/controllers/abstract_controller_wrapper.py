@@ -47,3 +47,11 @@ class AbstractControllerWrapper(ABC):
     async def handle_rumble_on_sound_index(self, sound_index):
         """Handle rumble patterns based on sound index (async)."""
         raise NotImplementedError
+
+    async def set_player_led(self, player_id):
+        """Sets the player LED to the corresponding pattern.
+
+        Args:
+            player_id (int): The player ID, starting from 1.
+        """
+        raise NotImplementedError
