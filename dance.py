@@ -78,6 +78,10 @@ async def get_joycon_list(app):
                 if battery_level > 0:
                     break
 
+            # set to "disconnected" pattern, better works after battery level is read
+            # TODO: use ControllerWrapper instead of JoyCon
+            joycon.set_player_lamp(8)
+
             color = "#%02x%02x%02x" % joycon.color_body
 
             info = {

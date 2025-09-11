@@ -610,6 +610,7 @@ class JoyCon:
             ((flashing_pattern & 0xF) << 4).to_bytes(1, byteorder='little'))
 
     def set_player_lamp(self, pattern: int):
+        logger.debug(f"{id(self)} {self.serial}: set_player_lamp {pattern}")
         self._write_output_report(
             b'\x01', b'\x30',
             pattern.to_bytes(1, byteorder='little'))

@@ -252,6 +252,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.ws = None
         logger.debug("%s: Disconnected", self.controller.serial)
         self.is_connected = False
+        # set to "disconnected" pattern
+        await self.controller.set_player_led(0)
         await self.on_state_changed(self.controller.serial, {"state": PairingState.DISCONNECTED.value})
         if self.should_reconnect and not self.reconnection_task:
             self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
@@ -329,6 +331,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self.send_message("JD_PhoneDataCmdSync", {"phoneID": message["phoneID"]})
         elif __class == "JD_ProfilePhoneUiData":
             await self.parse_profile_data(message)
+            await self.controller.set_player_led(self.profile_data.get("player_id", 0))
         elif __class == "JD_PlaySound_ConsoleCommandData":
             sound_index = message.get("soundIndex", 0)
             await self.controller.handle_rumble_on_sound_index(sound_index)
