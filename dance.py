@@ -31,6 +31,16 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger("dance")
 
 
+def handle_task_exception(task):
+    """Callback to handle exceptions in background tasks."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass  # Task cancellation is expected
+    except Exception as e:
+        logger.error("Unhandled exception in background task: %s", e, exc_info=True)
+
+
 CONFIG_PATHS = ["config.cfg", os.path.join(get_datadir(), "config.cfg")]
 
 
@@ -67,121 +77,151 @@ async def get_joycon_list(app):
     logger.debug("get_joycon_list devices: %s", devices)
 
     for dev in devices:
-        if dev["serial"] in app["joycons_info"]:
-            info = app["joycons_info"][dev["serial"]]
-        else:
-            joycon = JoyCon(dev["vendor_id"], dev["product_id"], dev["serial"])
-            # Wait for initial data
-            for _ in range(3):
-                await asyncio.sleep(0.05)
-                battery_level = joycon.get_battery_level()
-                if battery_level > 0:
-                    break
+        try:
+            if dev["serial"] in app["joycons_info"]:
+                info = app["joycons_info"][dev["serial"]]
+            else:
+                logger.debug(f"Initializing JoyCon {dev['serial']}")
+                joycon = JoyCon(dev["vendor_id"], dev["product_id"], dev["serial"])
+                # Wait for initial data
+                for _ in range(3):
+                    await asyncio.sleep(0.05)
+                    battery_level = joycon.get_battery_level()
+                    if battery_level > 0:
+                        break
 
-            # set to "disconnected" pattern, better works after battery level is read
-            # TODO: use ControllerWrapper instead of JoyCon
-            joycon.set_player_lamp(8)
+                # set to "disconnected" pattern, better works after battery level is read
+                # TODO: use ControllerWrapper instead of JoyCon
+                joycon.set_player_lamp(8)
 
-            color = "#%02x%02x%02x" % joycon.color_body
+                color = "#%02x%02x%02x" % joycon.color_body
 
-            info = {
-                "vendor_id": dev["vendor_id"],
-                "product_id": dev["product_id"],
-                "serial": dev["serial"],
-                "name": dev["product_string"],
-                "color": color,
-                "battery_level": battery_level,
-                "is_left": joycon.is_left(),
-                "state": PairingState.IDLE.value,
-                "pairing_code": "",
-                "rumble_enabled": joycon.rumble_enabled,
-            }
-            # Force delete the joycon object
-            # FIXME: Why just `del joycon` doesn't always call __del__?
-            joycon.__del__()
-            del joycon
+                info = {
+                    "vendor_id": dev["vendor_id"],
+                    "product_id": dev["product_id"],
+                    "serial": dev["serial"],
+                    "name": dev["product_string"],
+                    "color": color,
+                    "battery_level": battery_level,
+                    "is_left": joycon.is_left(),
+                    "state": PairingState.IDLE.value,
+                    "pairing_code": "",
+                    "rumble_enabled": joycon.rumble_enabled,
+                }
+                # Force delete the joycon object
+                # FIXME: Why just `del joycon` doesn't always call __del__?
+                joycon.__del__()
+                del joycon
 
-            app["joycons_info"][dev["serial"]] = info
+                app["joycons_info"][dev["serial"]] = info
+                logger.debug(f"JoyCon {dev['serial']} initialized successfully")
 
-        joycons.append(info)
+            joycons.append(info)
+        except Exception as e:
+            logger.error(f"Error initializing JoyCon {dev.get('serial', 'unknown')}: {e}", exc_info=True)
+            # Continue with other devices even if one fails
+            continue
+
     logger.debug("get_joycon_list joycons: %s", joycons)
     return sorted(joycons, key=lambda x: (x["name"], x["color"], x["serial"]))
 
 
 async def connect_joycon(app, ws, data) -> None:
     async def on_joydance_state_changed(serial, update_dict):
-        app["joycons_info"][serial].update(update_dict)
         try:
+            app["joycons_info"][serial].update(update_dict)
             await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["joycons_info"][serial])
         except Exception as e:
-            logger.error(e)
+            logger.error("Error in on_joydance_state_changed: %s", e, exc_info=True)
 
     async def on_game_message(message):
-        __class = message.get("__class")
-        if __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
-            await ws_send_response(ws, WsCommand.SHOW_SEARCH, {"serial": serial})
-        elif __class == "JD_CancelKeyboard_ConsoleCommandData":
-            await ws_send_response(ws, WsCommand.HIDE_SEARCH, {"serial": serial})
+        try:
+            __class = message.get("__class")
+            if __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
+                await ws_send_response(ws, WsCommand.SHOW_SEARCH, {"serial": serial})
+            elif __class == "JD_CancelKeyboard_ConsoleCommandData":
+                await ws_send_response(ws, WsCommand.HIDE_SEARCH, {"serial": serial})
+        except Exception as e:
+            logger.error("Error in on_game_message: %s", e, exc_info=True)
 
-    logger.debug("connect_joycon: %s", data)
+    try:
+        logger.debug("connect_joycon: %s", data)
 
-    serial = data["joycon_serial"]
-    product_id = app["joycons_info"][serial]["product_id"]
-    vendor_id = app["joycons_info"][serial]["vendor_id"]
+        serial = data["joycon_serial"]
+        product_id = app["joycons_info"][serial]["product_id"]
+        vendor_id = app["joycons_info"][serial]["vendor_id"]
 
-    pairing_method = data["pairing_method"]
-    host_ip_addr = data["host_ip_addr"]
-    console_ip_addr = data["console_ip_addr"]
-    pairing_code = data["pairing_code"]
+        pairing_method = data["pairing_method"]
+        host_ip_addr = data["host_ip_addr"]
+        console_ip_addr = data["console_ip_addr"]
+        pairing_code = data["pairing_code"]
 
-    if not app["config_handler"].is_new_config_valid(data):
-        return
+        is_valid, error_msg = app["config_handler"].validate_config_with_error(data)
+        if not is_valid:
+            logger.error(f"Configuration validation failed: {error_msg}")
+            raise ValueError(f"Configuration validation failed: {error_msg}")
 
-    config = app["config_handler"].data.copy()
-    config["pairing_code"] = pairing_code
-    config["pairing_method"] = pairing_method
-    config["host_ip_addr"] = host_ip_addr
-    config["console_ip_addr"] = console_ip_addr
-    app["config_handler"].data = config
+        config = app["config_handler"].data.copy()
+        config["pairing_code"] = pairing_code
+        config["pairing_method"] = pairing_method
+        config["host_ip_addr"] = host_ip_addr
+        config["console_ip_addr"] = console_ip_addr
+        app["config_handler"].data = config
 
-    if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
-        app["joycons_info"][serial]["pairing_code"] = pairing_code
-        console_ip_addr = None
-    else:
-        app["joycons_info"][serial]["pairing_code"] = ""
+        if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
+            app["joycons_info"][serial]["pairing_code"] = pairing_code
+            console_ip_addr = None
+        else:
+            app["joycons_info"][serial]["pairing_code"] = ""
 
-    raw_joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
-    logger.debug(f"{id(raw_joycon)} {serial}: connect_joycon")
-    # Wrap the raw_joycon with JoyConWrapper
-    controller = JoyConWrapper(raw_joycon)
+        raw_joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
+        logger.debug(f"{id(raw_joycon)} {serial}: connect_joycon - creating ButtonEventJoyCon")
+        # Wrap the raw_joycon with JoyConWrapper
+        controller = JoyConWrapper(raw_joycon)
+        logger.debug(f"{serial}: connect_joycon - created JoyConWrapper")
 
-    if pairing_method == PairingMethod.OLD.value:
-        game_class = JustDanceGameV1
-    else:
-        game_class = JustDanceGameV2
+        if pairing_method == PairingMethod.OLD.value:
+            game_class = JustDanceGameV1
+        else:
+            game_class = JustDanceGameV2
 
-    game_connection = game_class(
-        controller=controller,
-        pairing_code=pairing_code,
-        host_ip_addr=host_ip_addr,
-        console_ip_addr=console_ip_addr,
-        on_state_changed=on_joydance_state_changed,
-        on_game_message=on_game_message,
-    )
+        logger.debug(f"{serial}: connect_joycon - creating {game_class.__name__} instance")
+        game_connection = game_class(
+            controller=controller,
+            pairing_code=pairing_code,
+            host_ip_addr=host_ip_addr,
+            console_ip_addr=console_ip_addr,
+            on_state_changed=on_joydance_state_changed,
+            on_game_message=on_game_message,
+        )
 
-    app["joydance_connections"][serial] = game_connection
-    # Update rumble_enabled state in joycons_info from the controller
-    if serial in app["joycons_info"] and hasattr(controller, "rumble_enabled"):
-        app["joycons_info"][serial]["rumble_enabled"] = controller.rumble_enabled
+        app["joydance_connections"][serial] = game_connection
+        # Update rumble_enabled state in joycons_info from the controller
+        if serial in app["joycons_info"] and hasattr(controller, "rumble_enabled"):
+            app["joycons_info"][serial]["rumble_enabled"] = controller.rumble_enabled
 
-    asyncio.create_task(game_connection.pair())
+        logger.debug(f"{serial}: connect_joycon - starting pair() task")
+        task = asyncio.create_task(game_connection.pair())
+        task.add_done_callback(handle_task_exception)
+        logger.debug(f"{serial}: connect_joycon - completed successfully")
+    except Exception as e:
+        logger.error(f"Error in connect_joycon: {e}", exc_info=True)
+        raise
 
 
 async def disconnect_joycon(app, ws, data):
-    logger.debug("disconnect_joycon: %s", data)
-    serial = data["joycon_serial"]
-    joydance = app["joydance_connections"][serial]
-    await joydance.disconnect(should_reconnect=False)
+    try:
+        logger.debug("disconnect_joycon: %s", data)
+        serial = data["joycon_serial"]
+        if serial not in app["joydance_connections"]:
+            logger.warning(f"Attempted to disconnect unknown JoyCon: {serial}")
+            return
+        joydance = app["joydance_connections"][serial]
+        await joydance.disconnect(should_reconnect=False)
+        logger.debug(f"{serial}: disconnect_joycon - completed successfully")
+    except Exception as e:
+        logger.error(f"Error in disconnect_joycon: {e}", exc_info=True)
+        raise
 
 
 async def on_startup(app):
@@ -264,9 +304,15 @@ async def ws_send_response(ws, cmd, data):
 
 
 async def toggle_rumble(app, ws, data):
-    serial = data["joycon_serial"]
-    enabled = data["enabled"]
-    if serial in app["joydance_connections"]:
+    try:
+        serial = data["joycon_serial"]
+        enabled = data["enabled"]
+        logger.debug(f"toggle_rumble: serial={serial}, enabled={enabled}")
+
+        if serial not in app["joydance_connections"]:
+            logger.warning(f"Attempted to toggle rumble for unknown JoyCon: {serial}")
+            return
+
         joydance = app["joydance_connections"][serial]
         joydance.set_rumble(enabled)
         # Update the info for UI
@@ -274,51 +320,71 @@ async def toggle_rumble(app, ws, data):
             app["joycons_info"][serial]["rumble_enabled"] = enabled
             # Send update to client
             await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["joycons_info"][serial])
+        logger.debug(f"{serial}: toggle_rumble - completed successfully")
+    except Exception as e:
+        logger.error(f"Error in toggle_rumble: {e}", exc_info=True)
+        raise
 
 
 async def websocket_handler(request):
     ws = web.WebSocketResponse()
-    await ws.prepare(request)
+    try:
+        await ws.prepare(request)
+        async for msg in ws:
+            logger.debug("got ws msg %s", msg)
+            if msg.type == WSMsgType.TEXT:
+                cmd = None
+                try:
+                    msg_data = msg.json()
+                    cmd = WsCommand(msg_data["cmd"])
+                    data = msg_data.get("data", {})
+                except (ValueError, KeyError) as e:
+                    logger.error("Invalid message format: %s", e)
+                    logger.error("Message content: %s", msg.data)
+                    continue
+                except Exception as e:
+                    logger.error("Unexpected error parsing message: %s", e, exc_info=True)
+                    continue
 
-    async for msg in ws:
-        logger.debug("got ws msg %s", msg)
-        if msg.type == WSMsgType.TEXT:
-            try:
-                msg_data = msg.json()
-                cmd = WsCommand(msg_data["cmd"])
-                data = msg_data.get("data", {})
-            except (ValueError, KeyError) as e:
-                logger.error("Invalid message: %s", e)
-                logger.error("Message content: %s", msg.data)
-                continue
-
-            try:
-                if cmd == WsCommand.SEARCH_INPUT:
-                    text = data.get("text", "")
-                    # TODO: use main joycon?
-                    serial = next(iter(request.app["joydance_connections"]))
-                    joydance = request.app["joydance_connections"][serial]
-                    if joydance.is_search_opened:
-                        await joydance.send_message(
-                            "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": text}
-                        )
-                elif cmd == WsCommand.GET_JOYCON_LIST:
-                    joycon_list = await get_joycon_list(request.app)
-                    await ws_send_response(ws, cmd, joycon_list)
-                elif cmd == WsCommand.CONNECT_JOYCON:
-                    await connect_joycon(request.app, ws, data)
-                    await ws_send_response(ws, cmd, {})
-                elif cmd == WsCommand.DISCONNECT_JOYCON:
-                    await disconnect_joycon(request.app, ws, data)
-                    await ws_send_response(ws, cmd, {})
-                elif cmd == WsCommand.TOGGLE_RUMBLE:
-                    await toggle_rumble(request.app, ws, data)
-            except Exception as e:
-                logger.error("Error handling command %s: %s", cmd, e)
-                # Send error response to client
-                await ws_send_response(ws, cmd, {"error": str(e), "status": "error"})
-        elif msg.type == WSMsgType.ERROR:
-            logger.error("ws connection closed with exception %s", ws.exception())
+                try:
+                    if cmd == WsCommand.SEARCH_INPUT:
+                        text = data.get("text", "")
+                        if not request.app["joydance_connections"]:
+                            logger.warning("SEARCH_INPUT received but no JoyCon connected")
+                            continue
+                        # TODO: use main joycon?
+                        serial = next(iter(request.app["joydance_connections"]))
+                        joydance = request.app["joydance_connections"][serial]
+                        if joydance.is_search_opened:
+                            await joydance.send_message(
+                                "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": text}
+                            )
+                    elif cmd == WsCommand.GET_JOYCON_LIST:
+                        joycon_list = await get_joycon_list(request.app)
+                        await ws_send_response(ws, cmd, joycon_list)
+                    elif cmd == WsCommand.CONNECT_JOYCON:
+                        await connect_joycon(request.app, ws, data)
+                        await ws_send_response(ws, cmd, {})
+                    elif cmd == WsCommand.DISCONNECT_JOYCON:
+                        await disconnect_joycon(request.app, ws, data)
+                        await ws_send_response(ws, cmd, {})
+                    elif cmd == WsCommand.TOGGLE_RUMBLE:
+                        await toggle_rumble(request.app, ws, data)
+                    else:
+                        logger.warning(f"Unknown command: {cmd}")
+                except Exception as e:
+                    logger.error("Error handling command %s: %s", cmd, e, exc_info=True)
+                    # Send error response to client
+                    try:
+                        await ws_send_response(ws, cmd, {"error": str(e), "status": "error"})
+                    except Exception as send_error:
+                        logger.error("Failed to send error response: %s", send_error, exc_info=True)
+            elif msg.type == WSMsgType.ERROR:
+                logger.error("ws connection closed with exception %s", ws.exception())
+    except Exception as e:
+        logger.error("Fatal error in websocket_handler: %s", e, exc_info=True)
+    finally:
+        logger.debug("Websocket handler exiting")
 
     return ws
 
@@ -346,6 +412,20 @@ def get_args():
     return parser.parse_args()
 
 
+def asyncio_exception_handler(loop, context):
+    """Global exception handler for asyncio tasks."""
+    exception = context.get("exception")
+    if exception:
+        logger.error(
+            "Uncaught exception in asyncio task: %s",
+            exception,
+            exc_info=(type(exception), exception, exception.__traceback__)
+        )
+    else:
+        logger.error("Uncaught exception in asyncio: %s", context.get("message", "Unknown error"))
+        logger.error("Full context: %s", context)
+
+
 if __name__ == "__main__":
     args = get_args()
 
@@ -356,34 +436,46 @@ if __name__ == "__main__":
         logging_handlers.append(logging.FileHandler(args.logs_filepath))
     logging.basicConfig(handlers=logging_handlers, level=logging_level)
 
-    app = web.Application()
-    # Need to manually set media type mapping for js, as windows has a
-    # bug in which it sometimes parses .js files at "text/plain"
-    mimetypes.init()
-    mimetypes.types_map[".js"] = "application/javascript"
+    # Set up global asyncio exception handler
+    loop = asyncio.get_event_loop()
+    loop.set_exception_handler(asyncio_exception_handler)
 
-    # Define app variables and load&save config
-    app["joydance_connections"] = {}
-    app["joycons_info"] = {}
-    app["config_handler"] = ConfigHandler(CONFIG_PATHS)
-    app["loaded_cfg_path"] = app["config_handler"].current_cfg_path
-    app["config_handler"].save_data()
-    app["saved_cfg_path"] = app["config_handler"].current_cfg_path
+    logger.info("Starting JoyDance application...")
 
-    app.on_startup.append(on_startup)
-    app.add_routes(
-        [
-            web.get("/", html_handler),
-            web.get("/favicon.png", favicon_handler),
-            web.get("/ws", websocket_handler),
-            web.static("/css", get_static_path("static/css")),
-            web.static("/js", get_static_path("static/js")),
-        ]
-    )
+    try:
+        app = web.Application()
+        # Need to manually set media type mapping for js, as windows has a
+        # bug in which it sometimes parses .js files at "text/plain"
+        mimetypes.init()
+        mimetypes.types_map[".js"] = "application/javascript"
 
-    web.run_app(
-        app,
-        host="0.0.0.0",
-        port=32623,
-        print=lambda *args: print("======== Running on http://localhost:32623 ========"),
-    )
+        # Define app variables and load&save config
+        app["joydance_connections"] = {}
+        app["joycons_info"] = {}
+        app["config_handler"] = ConfigHandler(CONFIG_PATHS)
+        app["loaded_cfg_path"] = app["config_handler"].current_cfg_path
+        app["config_handler"].save_data()
+        app["saved_cfg_path"] = app["config_handler"].current_cfg_path
+
+        app.on_startup.append(on_startup)
+        app.add_routes(
+            [
+                web.get("/", html_handler),
+                web.get("/favicon.png", favicon_handler),
+                web.get("/ws", websocket_handler),
+                web.static("/css", get_static_path("static/css")),
+                web.static("/js", get_static_path("static/js")),
+            ]
+        )
+
+        web.run_app(
+            app,
+            host="0.0.0.0",
+            port=32623,
+            print=lambda *args: print("======== Running on http://localhost:32623 ========"),
+        )
+    except KeyboardInterrupt:
+        logger.info("Application stopped by user (KeyboardInterrupt)")
+    except Exception as e:
+        logger.critical("Critical error in main: %s", e, exc_info=True)
+        raise

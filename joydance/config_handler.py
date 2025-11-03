@@ -3,6 +3,7 @@ import re
 import os
 import socket
 import sys
+import ipaddress
 
 from .constants import PairingMethod
 
@@ -56,6 +57,26 @@ class ConfigHandler:
         ):
             return False
         return True
+
+    @staticmethod
+    def validate_config_with_error(new_config) -> tuple[bool, str]:
+        """Validate config and return (is_valid, error_message)."""
+
+        method = new_config.get("pairing_method")
+        if not is_valid_pairing_method(method):
+            return False, f"Invalid pairing method: {method}"
+
+        if method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
+            if not is_valid_ip_address(new_config.get("host_ip_addr", "")):
+                return False, f"Invalid host IP address: {new_config.get('host_ip_addr', '')}"
+            if not is_valid_pairing_code(new_config.get("pairing_code", "")):
+                return False, f"Invalid pairing code (must be 6 digits): {new_config.get('pairing_code', '')}"
+
+        if method == PairingMethod.FAST.value:
+            if not is_valid_ip_address(new_config.get("console_ip_addr", "")):
+                return False, f"Invalid console IP address: {new_config.get('console_ip_addr', '')}"
+
+        return True, ""
 
     @staticmethod
     def validate_new_config(new_config):
@@ -121,7 +142,15 @@ def is_valid_pairing_code(val: str) -> bool:
 
 
 def is_valid_ip_address(val: str) -> bool:
-    return re.match(REGEX_LOCAL_IP_ADDRESS, val) is not None
+    """Validate IP address. Accepts all valid IPv4 addresses (private and public)."""
+    if not val:
+        return False
+    try:
+        ipaddress.ip_address(val)
+        # Accept both IPv4 and IPv6
+        return True
+    except ValueError:
+        return False
 
 
 def is_valid_pairing_method(val: str) -> bool:
@@ -134,10 +163,20 @@ def is_valid_pairing_method(val: str) -> bool:
 
 
 def get_host_ip() -> str | None:
+    """Get the host IP address, preferring private network addresses."""
     try:
-        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if ip.startswith("192.168") or ip.startswith("10."):
-                return ip
+        for ip_str in socket.gethostbyname_ex(socket.gethostname())[2]:
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                # Prefer private IP addresses (10.x, 172.16-31.x, 192.168.x)
+                if ip.is_private and not ip.is_loopback:
+                    return ip_str
+            except ValueError:
+                continue
+        # If no private IP found, return the first valid IP
+        for ip_str in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if is_valid_ip_address(ip_str):
+                return ip_str
     except Exception:
         pass
     return None
