@@ -142,10 +142,10 @@ SHORTCUT_MAPPING = {
         Command.TOGGLE_COOP,
         Command.SHORTCUT_EXTRA,
         Command.V1_FAVORITE,
+        Command.ACTIVATE_DANCER_PROFILE,
     ],
     JoyConButton.Y: [
         Command.ACTIVATE_DANCERCARD,
-        Command.ACTIVATE_DANCER_PROFILE,
         Command.CHANGE_DANCERCARD,
         Command.SWEAT_ACTIVATION,
         Command.UPLAY,
