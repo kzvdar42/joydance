@@ -177,6 +177,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             self.is_on_recap = True
 
         shortcuts_data = data.get("setupData", {}).get("shortcuts", [])
+        logger.debug("V1 shortcuts_data: %s", shortcuts_data)
         if shortcuts_data:
             shortcuts_identifiers = set()
             for shortcut in shortcuts_data:
