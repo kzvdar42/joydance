@@ -373,7 +373,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 self.action_id,
             )
             try:
-                selected_action = self.item_actions[row_idx][col_idx][action_idx].copy()
+                selected_action = self.item_actions[row_idx][col_idx][action_idx]
+                if not isinstance(selected_action, str):
+                    selected_action = selected_action.copy()
             except:
                 logger.error(
                     "Failed to get selected action %s, %s, %s, %s",
@@ -381,9 +383,12 @@ class JustDanceGameV1(JustDanceGameAbstract):
                     col_idx,
                     action_idx,
                     self.item_actions,
+                    exc_info=True,
                 )
                 selected_action = ""
             if selected_action:
+                if isinstance(selected_action, str):
+                    return None, selected_action
                 return selected_action.pop("__class", None), selected_action
             else:
                 __class = "ValidateAction_PhoneCommandData"
