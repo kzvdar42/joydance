@@ -64,6 +64,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 sock=self.console_conn,
                 ssl=ssl_context,
                 ping_timeout=None,
+                max_size=None,  # Disable message size limit to handle large JD_PhoneUiSetupData messages
                 server_hostname=server_hostname,
             ) as websocket:
                 self.ws = websocket
