@@ -1,8 +1,7 @@
 import asyncio
+from collections import defaultdict
 import json
 import logging
-import platform
-import time
 import os
 import sys
 import mimetypes
@@ -12,16 +11,13 @@ import aiohttp
 import hid
 from aiohttp import WSMsgType, web
 
-from joydance.joydance_wrapper import JoyDance
 from joydance.config_handler import ConfigHandler, get_datadir
 from joydance.constants import (
     WsCommand,
     PairingMethod,
     JOYDANCE_VERSION,
-    WsSubprotocolVersion,
-    PairingState,
+    BASE_CONTROLLER_STATE_INFO,
 )
-from pycon import ButtonEventJoyCon, JoyCon
 from pycon.constants import JOYCON_PRODUCT_IDS, JOYCON_VENDOR_ID
 from joydance.controllers.joycon_wrapper import JoyConWrapper
 from joydance.games.justdance_v1 import JustDanceGameV1
@@ -70,67 +66,59 @@ async def get_device_ids():
         )
     return out
 
-
-async def get_joycon_list(app):
-    joycons = []
+async def update_controllers_list(app):
     devices = await get_device_ids()
-    logger.debug("get_joycon_list devices: %s", devices)
+    logger.debug("update_controllers_list devices: %s", devices)
 
     for dev in devices:
         try:
-            if dev["serial"] in app["joycons_info"]:
-                info = app["joycons_info"][dev["serial"]]
-            else:
-                logger.debug(f"Initializing JoyCon {dev['serial']}")
-                joycon = JoyCon(dev["vendor_id"], dev["product_id"], dev["serial"])
-                # Wait for initial data
-                for _ in range(3):
-                    await asyncio.sleep(0.05)
-                    battery_level = joycon.get_battery_level()
-                    if battery_level > 0:
-                        break
+            if dev["serial"] in app["controllers"]:
+                continue
 
-                # set to "disconnected" pattern, better works after battery level is read
-                # TODO: use ControllerWrapper instead of JoyCon
-                joycon.set_player_lamp(8)
-
-                color = "#%02x%02x%02x" % joycon.color_body
-
-                info = {
-                    "vendor_id": dev["vendor_id"],
-                    "product_id": dev["product_id"],
-                    "serial": dev["serial"],
-                    "name": dev["product_string"],
-                    "color": color,
-                    "battery_level": battery_level,
-                    "is_left": joycon.is_left(),
-                    "state": PairingState.IDLE.value,
-                    "pairing_code": "",
-                    "rumble_enabled": joycon.rumble_enabled,
-                }
-                # Force delete the joycon object
-                # FIXME: Why just `del joycon` doesn't always call __del__?
-                joycon.__del__()
-                del joycon
-
-                app["joycons_info"][dev["serial"]] = info
-                logger.debug(f"JoyCon {dev['serial']} initialized successfully")
-
-            joycons.append(info)
+            controller = JoyConWrapper(dev["vendor_id"], dev["product_id"], dev["serial"])
+            # set to "disconnected" pattern
+            await controller.set_player_led(-1)
+            app["controllers"][dev["serial"]] = controller
         except Exception as e:
-            logger.error(f"Error initializing JoyCon {dev.get('serial', 'unknown')}: {e}", exc_info=True)
-            # Continue with other devices even if one fails
+            logger.error(f"Error updating controller list: {e}", exc_info=True)
             continue
 
-    logger.debug("get_joycon_list joycons: %s", joycons)
-    return sorted(joycons, key=lambda x: (x["name"], x["color"], x["serial"]))
+async def update_controllers_info(app):
+    await update_controllers_list(app)
+    controllers_info = []
+    for controller in app["controllers"].values():
+        try:
+            battery_level = await controller.battery_level()
+            color = "#%02x%02x%02x" % controller.color_body
 
+            controller_info = {
+                "vendor_id": controller.vendor_id,
+                "product_id": controller.product_id,
+                "serial": controller.serial,
+                "name": controller.name,
+                "color": color,
+                "battery_level": battery_level,
+                "is_left": controller.is_left(),
+                "rumble_enabled": controller.rumble_enabled,
+            }
+
+            # Add base info fields for controllers that are not connected yet
+            if controller.serial not in app["joydance_connections"]:
+                controller_info.update(BASE_CONTROLLER_STATE_INFO)
+
+            app["controllers_info"][controller.serial].update(controller_info)
+            controllers_info.append(controller_info)
+        except Exception as e:
+            logger.error(f"Error initializing JoyCon {controller.serial}: {e}", exc_info=True)
+            continue
+
+    return sorted(controllers_info, key=lambda x: (x["name"], x["color"], x["serial"]))
 
 async def connect_joycon(app, ws, data) -> None:
     async def on_joydance_state_changed(serial, update_dict):
         try:
-            app["joycons_info"][serial].update(update_dict)
-            await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["joycons_info"][serial])
+            app["controllers_info"][serial].update(update_dict)
+            await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["controllers_info"][serial])
         except Exception as e:
             logger.error("Error in on_joydance_state_changed: %s", e, exc_info=True)
 
@@ -148,8 +136,7 @@ async def connect_joycon(app, ws, data) -> None:
         logger.debug("connect_joycon: %s", data)
 
         serial = data["joycon_serial"]
-        product_id = app["joycons_info"][serial]["product_id"]
-        vendor_id = app["joycons_info"][serial]["vendor_id"]
+        controller = app["controllers"][serial]
 
         pairing_method = data["pairing_method"]
         host_ip_addr = data["host_ip_addr"]
@@ -169,16 +156,10 @@ async def connect_joycon(app, ws, data) -> None:
         app["config_handler"].data = config
 
         if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
-            app["joycons_info"][serial]["pairing_code"] = pairing_code
+            app["controllers_info"][serial]["pairing_code"] = pairing_code
             console_ip_addr = None
         else:
-            app["joycons_info"][serial]["pairing_code"] = ""
-
-        raw_joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
-        logger.debug(f"{id(raw_joycon)} {serial}: connect_joycon - creating ButtonEventJoyCon")
-        # Wrap the raw_joycon with JoyConWrapper
-        controller = JoyConWrapper(raw_joycon)
-        logger.debug(f"{serial}: connect_joycon - created JoyConWrapper")
+            app["controllers_info"][serial]["pairing_code"] = ""
 
         if pairing_method == PairingMethod.OLD.value:
             game_class = JustDanceGameV1
@@ -196,9 +177,6 @@ async def connect_joycon(app, ws, data) -> None:
         )
 
         app["joydance_connections"][serial] = game_connection
-        # Update rumble_enabled state in joycons_info from the controller
-        if serial in app["joycons_info"] and hasattr(controller, "rumble_enabled"):
-            app["joycons_info"][serial]["rumble_enabled"] = controller.rumble_enabled
 
         logger.debug(f"{serial}: connect_joycon - starting pair() task")
         task = asyncio.create_task(game_connection.pair())
@@ -316,10 +294,10 @@ async def toggle_rumble(app, ws, data):
         joydance = app["joydance_connections"][serial]
         joydance.set_rumble(enabled)
         # Update the info for UI
-        if serial in app["joycons_info"]:
-            app["joycons_info"][serial]["rumble_enabled"] = enabled
+        if serial in app["controllers_info"]:
+            app["controllers_info"][serial]["rumble_enabled"] = enabled
             # Send update to client
-            await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["joycons_info"][serial])
+            await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["controllers_info"][serial])
         logger.debug(f"{serial}: toggle_rumble - completed successfully")
     except Exception as e:
         logger.error(f"Error in toggle_rumble: {e}", exc_info=True)
@@ -360,8 +338,8 @@ async def websocket_handler(request):
                                 "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": text}
                             )
                     elif cmd == WsCommand.GET_JOYCON_LIST:
-                        joycon_list = await get_joycon_list(request.app)
-                        await ws_send_response(ws, cmd, joycon_list)
+                        controllers_info = await update_controllers_info(request.app)
+                        await ws_send_response(ws, cmd, controllers_info)
                     elif cmd == WsCommand.CONNECT_JOYCON:
                         await connect_joycon(request.app, ws, data)
                         await ws_send_response(ws, cmd, {})
@@ -451,7 +429,8 @@ if __name__ == "__main__":
 
         # Define app variables and load&save config
         app["joydance_connections"] = {}
-        app["joycons_info"] = {}
+        app["controllers"] = {}
+        app["controllers_info"] = defaultdict(dict)
         app["config_handler"] = ConfigHandler(CONFIG_PATHS)
         app["loaded_cfg_path"] = app["config_handler"].current_cfg_path
         app["config_handler"].save_data()

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from pycon import ButtonEventJoyCon
 from joydance.constants import JoyConButton, Command, SHORTCUT_MAPPING
 from .abstract_controller_wrapper import AbstractControllerWrapper
 
@@ -10,12 +11,17 @@ logger = logging.getLogger("joydance")
 
 class JoyConWrapper(AbstractControllerWrapper):
 
-    def __init__(self, joycon):
+    def __init__(self, vendor_id, product_id, serial):
         super().__init__()
-        self.joycon = joycon
+        self.vendor_id = vendor_id
+        self.product_id = product_id
+        self.serial = serial
+        self.joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
+        self.color_body = self.joycon.color_body
         self.rumble_enabled = True
         self._available_shortcuts = set()
         self._is_battery_level_initialized = False
+        self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
 
     @property
     def serial(self):
@@ -47,6 +53,7 @@ class JoyConWrapper(AbstractControllerWrapper):
     def get_latest_command(self, commands_to_check=None):
         # Get pressed button
         for event_type, status in self.get_raw_button_events():
+            # Maybe change?
             if status == 0:  # 0 = pressed, 1 = released
                 continue
 

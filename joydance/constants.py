@@ -174,3 +174,10 @@ SHORTCUT_MAPPING[JoyConButton.LEFT] = SHORTCUT_MAPPING[JoyConButton.Y]
 SHORTCUT_MAPPING[JoyConButton.MINUS] = SHORTCUT_MAPPING[JoyConButton.PLUS]
 SHORTCUT_MAPPING[JoyConButton.L] = SHORTCUT_MAPPING[JoyConButton.R]
 SHORTCUT_MAPPING[JoyConButton.ZL] = SHORTCUT_MAPPING[JoyConButton.ZR]
+
+
+# Base controller state before connection
+BASE_CONTROLLER_STATE_INFO = {
+    "state": PairingState.IDLE.value,
+    "pairing_code": "",
+}
