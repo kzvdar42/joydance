@@ -14,7 +14,8 @@ class JoyConWrapper(AbstractControllerWrapper):
         super().__init__()
         self.joycon = joycon
         self.rumble_enabled = True
-        self._available_shortcuts = set()  # To be updated by game handler
+        self._available_shortcuts = set()
+        self._is_battery_level_initialized = False
 
     @property
     def serial(self):
@@ -27,6 +28,17 @@ class JoyConWrapper(AbstractControllerWrapper):
     @available_shortcuts.setter
     def available_shortcuts(self, shortcuts_set):
         self._available_shortcuts = shortcuts_set
+
+    async def battery_level(self):
+        if self._is_battery_level_initialized:
+            return self.joycon.get_battery_level()
+        for _ in range(3):
+            await asyncio.sleep(0.05)
+            battery_level = self.joycon.get_battery_level()
+            if battery_level > 0:
+                break
+        self._is_battery_level_initialized = True
+        return battery_level
 
     def get_raw_button_events(self):
         """Returns raw button events from the JoyCon."""

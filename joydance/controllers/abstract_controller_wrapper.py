@@ -20,6 +20,10 @@ class AbstractControllerWrapper(ABC):
     def available_shortcuts(self, shortcuts):
         self._available_shortcuts = shortcuts
 
+    async def battery_level(self):
+        """Return the battery level of the controller."""
+        raise NotImplementedError
+
     def get_latest_command(self, commands_to_check: set = None):
         """Return the latest command from the controller (button press, etc)."""
         raise NotImplementedError
