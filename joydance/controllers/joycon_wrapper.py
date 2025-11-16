@@ -187,25 +187,22 @@ class JoyConWrapper(AbstractControllerWrapper):
         Args:
             player_id (int): The player ID, starting from 1.
         """
+        # better works after battery level is read
+        if not self._is_battery_level_initialized:
+            await self.battery_level()
         # Using pattern from https://en-americas-support.nintendo.com/app/answers/detail/a_id/22424
-        lamp_pattern = 8 # use last led as "other state" indicator
-        if player_id == 1:
-            lamp_pattern = 1
-        elif player_id == 2:
-            lamp_pattern = 3
-        elif player_id == 3:
-            lamp_pattern = 7
-        elif player_id == 4:
-            lamp_pattern = 15
-        elif player_id == 5:
-            lamp_pattern = 9
-        elif player_id == 6:
-            lamp_pattern = 5
-        elif player_id == 7:
-            lamp_pattern = 13
-        elif player_id == 8:
-            lamp_pattern = 6
+        patterns = {
+            1: 1,
+            2: 3,
+            3: 7,
+            4: 15,
+            5: 9,
+            6: 5,
+            7: 13,
+            8: 6
+        }
+        lamp_pattern = patterns.get(player_id, 8)
         try:
             self.joycon.set_player_lamp(lamp_pattern)
-        except Exception as e:
+        except Exception:
             logger.exception("Error setting player LED on JoyCon.")
