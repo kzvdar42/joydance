@@ -24,10 +24,6 @@ class JoyConWrapper(AbstractControllerWrapper):
         self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
 
     @property
-    def serial(self):
-        return self.joycon.serial
-
-    @property
     def available_shortcuts(self):
         return self._available_shortcuts
 
