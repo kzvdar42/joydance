@@ -1,15 +1,19 @@
 import asyncio
 import logging
 
-from pycon import ButtonEventJoyCon
+from .pycon import ButtonEventJoyCon
+from .pycon.constants import JOYCON_VENDOR_ID, JOYCON_PRODUCT_IDS
 from joydance.constants import JoyConButton, Command, SHORTCUT_MAPPING
-from .abstract_controller_wrapper import AbstractControllerWrapper
+from joydance.controllers import AbstractControllerWrapper
 
 
 logger = logging.getLogger("joydance")
 
 
 class JoyConWrapper(AbstractControllerWrapper):
+
+    VENDOR_IDS = {JOYCON_VENDOR_ID}
+    PRODUCT_IDS = JOYCON_PRODUCT_IDS
 
     def __init__(self, vendor_id, product_id, serial):
         super().__init__()

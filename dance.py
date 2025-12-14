@@ -8,7 +8,6 @@ import mimetypes
 import argparse
 
 import aiohttp
-import hid
 from aiohttp import WSMsgType, web
 
 from joydance.config_handler import ConfigHandler, get_datadir
@@ -18,8 +17,7 @@ from joydance.constants import (
     JOYDANCE_VERSION,
     BASE_CONTROLLER_STATE_INFO,
 )
-from pycon.constants import JOYCON_PRODUCT_IDS, JOYCON_VENDOR_ID
-from joydance.controllers.joycon_wrapper import JoyConWrapper
+from joydance.controllers import update_controllers_list
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
 
@@ -40,51 +38,8 @@ def handle_task_exception(task):
 CONFIG_PATHS = ["config.cfg", os.path.join(get_datadir(), "config.cfg")]
 
 
-async def get_device_ids():
-    devices = hid.enumerate(JOYCON_VENDOR_ID, 0)
-    logger.debug("get_device_ids devices: %s", devices)
-    out = []
-    for device in devices:
-        vendor_id = device["vendor_id"]
-        product_id = device["product_id"]
-        product_string = device["product_string"]
-        serial = device.get("serial") or device.get("serial_number")
-
-        if product_id not in JOYCON_PRODUCT_IDS:
-            continue
-
-        if not product_string:
-            continue
-
-        out.append(
-            {
-                "vendor_id": vendor_id,
-                "product_id": product_id,
-                "serial": serial,
-                "product_string": product_string,
-            }
-        )
-    return out
-
-async def update_controllers_list(app):
-    devices = await get_device_ids()
-    logger.debug("update_controllers_list devices: %s", devices)
-
-    for dev in devices:
-        try:
-            if dev["serial"] in app["controllers"]:
-                continue
-
-            controller = JoyConWrapper(dev["vendor_id"], dev["product_id"], dev["serial"])
-            # set to "disconnected" pattern
-            await controller.set_player_led(-1)
-            app["controllers"][dev["serial"]] = controller
-        except Exception as e:
-            logger.error(f"Error updating controller list: {e}", exc_info=True)
-            continue
-
 async def update_controllers_info(app):
-    await update_controllers_list(app)
+    await update_controllers_list(app["controllers"])
     controllers_info = []
     for controller in app["controllers"].values():
         try:

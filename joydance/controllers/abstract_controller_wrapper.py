@@ -7,6 +7,10 @@ class AbstractControllerWrapper(ABC):
     Defines the interface for controller input, rumble, accelerometer, and joystick handling.
     """
 
+    # Set Vendor ID and Product ID
+    VENDOR_IDS = {}
+    PRODUCT_IDS = {}
+
     def __init__(self):
         self._available_shortcuts = set()
         self.rumble_enabled = False
