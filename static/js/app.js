@@ -5,7 +5,7 @@ import WebSocketStatusIndicator from '/js/components/WebSocketStatusIndicator.js
 import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
-import { JoyCons } from '/js/components/joycon.js';
+import { Controllers } from '/js/components/controller.js';
 import { PairingMethod, WsCommand, IpAddressRegex } from '/js/consts.js';
 
 window.mitty = mitt()
@@ -19,7 +19,7 @@ class App extends Component {
             host_ip_addr: window.CONFIG.host_ip_addr,
             console_ip_addr: window.CONFIG.console_ip_addr,
             pairing_code: window.CONFIG.pairing_code,
-            joycons: [],
+            controllers: [],
         }
         // Websocket settings
         this.reconnectAttempts = 0;
@@ -28,18 +28,18 @@ class App extends Component {
 
         this.connectWs = this.connectWs.bind(this)
         this.sendRequest = this.sendRequest.bind(this)
-        this.requestGetJoyconList = this.requestGetJoyconList.bind(this)
-        this.requestConnectJoycon = this.requestConnectJoycon.bind(this)
-        this.requestDisconnectJoycon = this.requestDisconnectJoycon.bind(this)
+        this.requestGetControllerList = this.requestGetControllerList.bind(this)
+        this.requestConnectController = this.requestConnectController.bind(this)
+        this.requestDisconnectController = this.requestDisconnectController.bind(this)
         this.handleMethodChange = this.handleMethodChange.bind(this)
         this.handleAddrChange = this.handleAddrChange.bind(this)
         this.handleCodeChange = this.handleCodeChange.bind(this)
         this.handleSearchInput = this.handleSearchInput.bind(this)
         this.handleToggleRumble = this.handleToggleRumble.bind(this)
 
-        window.mitty.on('req_' + WsCommand.GET_JOYCON_LIST, this.requestGetJoyconList)
-        window.mitty.on('req_' + WsCommand.CONNECT_JOYCON, this.requestConnectJoycon)
-        window.mitty.on('req_' + WsCommand.DISCONNECT_JOYCON, this.requestDisconnectJoycon)
+        window.mitty.on('req_' + WsCommand.GET_CONTROLLER_LIST, this.requestGetControllerList)
+        window.mitty.on('req_' + WsCommand.CONNECT_CONTROLLER, this.requestConnectController)
+        window.mitty.on('req_' + WsCommand.DISCONNECT_CONTROLLER, this.requestDisconnectController)
         window.mitty.on('req_' + WsCommand.SEARCH_INPUT, this.handleSearchInput)
         window.mitty.on('req_' + WsCommand.TOGGLE_RUMBLE, this.handleToggleRumble)
         window.mitty.on('update_method', this.handleMethodChange)
@@ -61,8 +61,8 @@ class App extends Component {
         this.socket.send(JSON.stringify(msg));
     }
 
-    requestGetJoyconList() {
-        this.sendRequest(WsCommand.GET_JOYCON_LIST);
+    requestGetControllerList() {
+        this.sendRequest(WsCommand.GET_CONTROLLER_LIST);
     }
 
     handleSearchInput(data) {
@@ -73,7 +73,7 @@ class App extends Component {
         this.sendRequest(WsCommand.TOGGLE_RUMBLE, data);
     }
 
-    requestConnectJoycon(serial) {
+    requestConnectController(serial) {
         const state = this.state
         const pairing_method = state.pairing_method
         let addr = pairing_method == PairingMethod.DEFAULT ? state.host_ip_addr : state.console_ip_addr
@@ -92,18 +92,18 @@ class App extends Component {
             }
         }
 
-        this.sendRequest(WsCommand.CONNECT_JOYCON, {
+        this.sendRequest(WsCommand.CONNECT_CONTROLLER, {
             pairing_method: state.pairing_method,
             host_ip_addr: state.host_ip_addr,
             console_ip_addr: state.console_ip_addr,
             pairing_code: state.pairing_code,
-            joycon_serial: serial,
+            controller_serial: serial,
         })
     }
 
-    requestDisconnectJoycon(serial) {
-        this.sendRequest(WsCommand.DISCONNECT_JOYCON, {
-            joycon_serial: serial,
+    requestDisconnectController(serial) {
+        this.sendRequest(WsCommand.DISCONNECT_CONTROLLER, {
+            controller_serial: serial,
         })
     }
 
@@ -114,7 +114,7 @@ class App extends Component {
 
         this.socket.onopen = (event) => {
             console.log('[open] Connection established')
-            that.requestGetJoyconList()
+            that.requestGetControllerList()
             window.mitty.emit('ws_connected');
             this.reconnectAttempts = 0;
         }
@@ -126,9 +126,9 @@ class App extends Component {
             const shortCmd = msg['cmd'].slice(5)  // Remove "resp_" prefix
 
             switch (shortCmd) {
-                case WsCommand.GET_JOYCON_LIST:
+                case WsCommand.GET_CONTROLLER_LIST:
                     that.setState({
-                        joycons: msg['data'],
+                        controllers: msg['data'],
                     })
                     break
                 case WsCommand.SHOW_SEARCH:
@@ -235,10 +235,10 @@ class App extends Component {
                     </fieldset>
                 </form>
 
-                <div class="pure-u-1 joycons">
-                    <${JoyCons} 
+                <div class="pure-u-1 controllers">
+                    <${Controllers} 
                         pairing_method=${state.pairing_method} 
-                        joycons=${state.joycons} 
+                        controllers=${state.controllers}
                     />
                 </div>
             </div>

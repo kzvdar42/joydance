@@ -14,7 +14,7 @@ class PairingState(Enum):
     DISCONNECTING = 5
     DISCONNECTED = 10
 
-    ERROR_JOYCON = 101
+    ERROR_CONTROLLER = 101
     ERROR_CONNECTION = 102
     ERROR_INVALID_PAIRING_CODE = 103
     ERROR_PUNCH_PAIRING = 104
@@ -34,10 +34,10 @@ WS_SUBPROTOCOLS = {
 
 
 class WsCommand(Enum):
-    GET_JOYCON_LIST = "get_joycon_list"
-    CONNECT_JOYCON = "connect_joycon"
-    DISCONNECT_JOYCON = "disconnect_joycon"
-    UPDATE_JOYCON_STATE = "update_joycon_state"
+    GET_CONTROLLER_LIST = "get_controller_list"
+    CONNECT_CONTROLLER = "connect_controller"
+    DISCONNECT_CONTROLLER = "disconnect_controller"
+    UPDATE_CONTROLLER_STATE = "update_controller_state"
     SEARCH_INPUT = "search_input"
     SHOW_SEARCH = "show_search"
     HIDE_SEARCH = "hide_search"

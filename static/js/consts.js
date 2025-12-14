@@ -6,10 +6,10 @@ export const PairingMethod = {
 }
 
 export const WsCommand = {
-    GET_JOYCON_LIST: 'get_joycon_list',
-    CONNECT_JOYCON: 'connect_joycon',
-    DISCONNECT_JOYCON: 'disconnect_joycon',
-    UPDATE_JOYCON_STATE: 'update_joycon_state',
+    GET_CONTROLLER_LIST: 'get_controller_list',
+    CONNECT_CONTROLLER: 'connect_controller',
+    DISCONNECT_CONTROLLER: 'disconnect_controller',
+    UPDATE_CONTROLLER_STATE: 'update_controller_state',
     SEARCH_INPUT: 'search_input',
     SHOW_SEARCH: 'show_search',
     HIDE_SEARCH: 'hide_search',

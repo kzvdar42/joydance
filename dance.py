@@ -64,16 +64,16 @@ async def update_controllers_info(app):
             app["controllers_info"][controller.serial].update(controller_info)
             controllers_info.append(controller_info)
         except Exception as e:
-            logger.error(f"Error initializing JoyCon {controller.serial}: {e}", exc_info=True)
+            logger.error(f"Error initializing {controller.__class__.__name__} {controller.serial}: {e}", exc_info=True)
             continue
 
     return sorted(controllers_info, key=lambda x: (x["name"], x["color"], x["serial"]))
 
-async def connect_joycon(app, ws, data) -> None:
+async def connect_controller(app, ws, data) -> None:
     async def on_joydance_state_changed(serial, update_dict):
         try:
             app["controllers_info"][serial].update(update_dict)
-            await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["controllers_info"][serial])
+            await ws_send_response(ws, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
         except Exception as e:
             logger.error("Error in on_joydance_state_changed: %s", e, exc_info=True)
 
@@ -88,9 +88,9 @@ async def connect_joycon(app, ws, data) -> None:
             logger.error("Error in on_game_message: %s", e, exc_info=True)
 
     try:
-        logger.debug("connect_joycon: %s", data)
+        logger.debug("connect_controller: %s", data)
 
-        serial = data["joycon_serial"]
+        serial = data["controller_serial"]
         controller = app["controllers"][serial]
 
         pairing_method = data["pairing_method"]
@@ -121,7 +121,7 @@ async def connect_joycon(app, ws, data) -> None:
         else:
             game_class = JustDanceGameV2
 
-        logger.debug(f"{serial}: connect_joycon - creating {game_class.__name__} instance")
+        logger.debug(f"{serial}: connect_controller - creating {game_class.__name__} instance")
         game_connection = game_class(
             controller=controller,
             pairing_code=pairing_code,
@@ -133,27 +133,27 @@ async def connect_joycon(app, ws, data) -> None:
 
         app["joydance_connections"][serial] = game_connection
 
-        logger.debug(f"{serial}: connect_joycon - starting pair() task")
+        logger.debug(f"{serial}: connect_controller - starting pair() task")
         task = asyncio.create_task(game_connection.pair())
         task.add_done_callback(handle_task_exception)
-        logger.debug(f"{serial}: connect_joycon - completed successfully")
+        logger.debug(f"{serial}: connect_controller - completed successfully")
     except Exception as e:
-        logger.error(f"Error in connect_joycon: {e}", exc_info=True)
+        logger.error(f"Error in connect_controller: {e}", exc_info=True)
         raise
 
 
-async def disconnect_joycon(app, ws, data):
+async def disconnect_controller(app, ws, data):
     try:
-        logger.debug("disconnect_joycon: %s", data)
-        serial = data["joycon_serial"]
+        logger.debug("disconnect_controller: %s", data)
+        serial = data["controller_serial"]
         if serial not in app["joydance_connections"]:
-            logger.warning(f"Attempted to disconnect unknown JoyCon: {serial}")
+            logger.warning(f"Attempted to disconnect unknown controller: {serial}")
             return
         joydance = app["joydance_connections"][serial]
         await joydance.disconnect(should_reconnect=False)
-        logger.debug(f"{serial}: disconnect_joycon - completed successfully")
+        logger.debug(f"{serial}: disconnect_controller - completed successfully")
     except Exception as e:
-        logger.error(f"Error in disconnect_joycon: {e}", exc_info=True)
+        logger.error(f"Error in disconnect_controller: {e}", exc_info=True)
         raise
 
 
@@ -238,12 +238,12 @@ async def ws_send_response(ws, cmd, data):
 
 async def toggle_rumble(app, ws, data):
     try:
-        serial = data["joycon_serial"]
+        serial = data["controller_serial"]
         enabled = data["enabled"]
         logger.debug(f"toggle_rumble: serial={serial}, enabled={enabled}")
 
         if serial not in app["joydance_connections"]:
-            logger.warning(f"Attempted to toggle rumble for unknown JoyCon: {serial}")
+            logger.warning(f"Attempted to toggle rumble for unknown controller: {serial}")
             return
 
         joydance = app["joydance_connections"][serial]
@@ -252,7 +252,7 @@ async def toggle_rumble(app, ws, data):
         if serial in app["controllers_info"]:
             app["controllers_info"][serial]["rumble_enabled"] = enabled
             # Send update to client
-            await ws_send_response(ws, WsCommand.UPDATE_JOYCON_STATE, app["controllers_info"][serial])
+            await ws_send_response(ws, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
         logger.debug(f"{serial}: toggle_rumble - completed successfully")
     except Exception as e:
         logger.error(f"Error in toggle_rumble: {e}", exc_info=True)
@@ -283,23 +283,23 @@ async def websocket_handler(request):
                     if cmd == WsCommand.SEARCH_INPUT:
                         text = data.get("text", "")
                         if not request.app["joydance_connections"]:
-                            logger.warning("SEARCH_INPUT received but no JoyCon connected")
+                            logger.warning("SEARCH_INPUT received but no controller connected")
                             continue
-                        # TODO: use main joycon?
+                        # TODO: use main controller?
                         serial = next(iter(request.app["joydance_connections"]))
                         joydance = request.app["joydance_connections"][serial]
                         if joydance.is_search_opened:
                             await joydance.send_message(
                                 "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": text}
                             )
-                    elif cmd == WsCommand.GET_JOYCON_LIST:
+                    elif cmd == WsCommand.GET_CONTROLLER_LIST:
                         controllers_info = await update_controllers_info(request.app)
                         await ws_send_response(ws, cmd, controllers_info)
-                    elif cmd == WsCommand.CONNECT_JOYCON:
-                        await connect_joycon(request.app, ws, data)
+                    elif cmd == WsCommand.CONNECT_CONTROLLER:
+                        await connect_controller(request.app, ws, data)
                         await ws_send_response(ws, cmd, {})
-                    elif cmd == WsCommand.DISCONNECT_JOYCON:
-                        await disconnect_joycon(request.app, ws, data)
+                    elif cmd == WsCommand.DISCONNECT_CONTROLLER:
+                        await disconnect_controller(request.app, ws, data)
                         await ws_send_response(ws, cmd, {})
                     elif cmd == WsCommand.TOGGLE_RUMBLE:
                         await toggle_rumble(request.app, ws, data)

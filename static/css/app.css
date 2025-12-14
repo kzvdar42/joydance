@@ -50,29 +50,29 @@ body {
     }
 }
 
-.joycons-wrapper button {
+.controllers-wrapper button {
     width: 100%;
 }
 
-.joycons .joycons-wrapper {
+.controllers .controllers-wrapper {
     position: relative;
 }
 
-.joycons .joycons-wrapper .empty {
+.controllers .controllers-wrapper .empty {
     height: 60px;
     line-height: 60px;
     margin: auto;
     text-align: center;
 }
 
-.joycons .joycons-wrapper .joycons-list {
+.controllers .controllers-wrapper .controllers-list {
     padding: 0;
     margin: 0;
     list-style: none;
 }
 
 
-.joycons .joycons-wrapper .joycons-list li {
+.controllers .controllers-wrapper .controllers-list li {
     border-bottom: 1px solid #3f3f3f;
     padding: 16px 0;
     transition: background-color 0.2s ease;
@@ -82,29 +82,29 @@ body {
 }
 
 
-.joycons .joycons-wrapper .joycons-list .joycon-color {
+.controllers .controllers-wrapper .controllers-list .controller-color {
     width: 35%;
     margin: auto;
 }
 
-.joycons .joycons-wrapper .joycons-list .joycon-name {
+.controllers .controllers-wrapper .controllers-list .controller-name {
     align-items: center;
     font-size: 16px;
     font-weight: bold;
 }
 
-.joycons .joycons-wrapper .joycons-list .joycon-info {
+.controllers .controllers-wrapper .controllers-list .controller-info {
     display: flex;
     flex-direction: column;
 }
 
-.joycons .joycons-wrapper .joycons-list .joycon-info .joycon-state {
+.controllers .controllers-wrapper .controllers-list .controller-info .controller-state {
     color: #757575;
     font-size: 14px;
     text-align: left;
 }
 
-.joycons-list .pairing-code {
+.controllers-list .pairing-code {
     border-radius: 4px;
     font-size: 12px;
     background-color: #202020;
@@ -138,7 +138,7 @@ input[readonly] {
     border-color: #3f3f3f !important;
 }
 
-#ipAddr, #pairingCode, .joycons-list .pairing-code {
+#ipAddr, #pairingCode, .controllers-list .pairing-code {
     font-family: ui-monospace, 'Segoe UI Mono', 'Roboto Mono', 'Courier New', monospace;
 }
 
@@ -187,7 +187,7 @@ input[readonly] {
     background-color: #7f8c8d;
 }
 
-.joycons .btn-refresh {
+.controllers .btn-refresh {
     background-color: #ffd700;
     color: #000 !important;
     font-weight: 500;
@@ -202,7 +202,7 @@ input[readonly] {
     display: inline-block;
 }
 
-.joycons .btn-refresh:hover {
+.controllers .btn-refresh:hover {
     background-color: #ffed4a;
 }
 
@@ -319,18 +319,18 @@ select option {
 }
 
 /* Adjust refresh button container and size */
-.joycons .pure-u-6-24 {
+.controllers .pure-u-6-24 {
     width: 90px;
 }
 
-.joycons .pure-g {
+.controllers .pure-g {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-top: 24px;
 }
 
-.joycons h2 {
+.controllers h2 {
     margin: 0;
     line-height: 32px;
     flex: 1;
@@ -351,19 +351,19 @@ select option {
 }
 
 /* Adjust the grid layout for better spacing */
-.joycons-list .pure-g {
+.controllers-list .pure-g {
     width: 100%;
     align-items: center;
 }
 
-.joycons-list .pure-u-6-24 {
+.controllers-list .pure-u-6-24 {
     text-align: right;
     padding-right: 4px;
     flex: 0 0 auto; /* Size to content */
 }
 
-.joycons-list .pure-u-2-24 {
-    flex: 0 0 40px; /* Fixed width for joycon icon */
+.controllers-list .pure-u-2-24 {
+    flex: 0 0 40px; /* Fixed width for controller icon */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -377,12 +377,12 @@ select option {
     justify-content: flex-end;
 }
 
-.joycons-list .pure-u-12-24 {
+.controllers-list .pure-u-12-24 {
     flex: 1; /* Allow info section to grow */
     min-width: 150px;
 }
 
-.joycons-list .pure-u-4-24 {
+.controllers-list .pure-u-4-24 {
     flex: 0 0 auto; /* Size to content */
 }
 
@@ -393,7 +393,7 @@ select option {
         width: 100%;
     }
 
-    .joycons-list .pure-u-6-24 {
+    .controllers-list .pure-u-6-24 {
         flex: 1 0 100%;
         margin-top: 8px;
     }
