@@ -26,6 +26,12 @@ class JoyConWrapper(AbstractControllerWrapper):
         self._available_shortcuts = set()
         self._is_battery_level_initialized = False
         self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
+        self._initialize_state()
+
+    def _initialize_state(self):
+        super()._initialize_state()
+        self._state["color"] = "#%02x%02x%02x" % self.color_body
+        self._state["is_left"] = self.is_left()
 
     @property
     def available_shortcuts(self):

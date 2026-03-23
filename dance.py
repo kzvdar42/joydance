@@ -43,23 +43,12 @@ async def update_controllers_info(app):
     controllers_info = []
     for controller in app["controllers"].values():
         try:
-            battery_level = await controller.battery_level()
-            color = "#%02x%02x%02x" % controller.color_body
-
-            controller_info = {
-                "vendor_id": controller.vendor_id,
-                "product_id": controller.product_id,
-                "serial": controller.serial,
-                "name": controller.name,
-                "color": color,
-                "battery_level": battery_level,
-                "is_left": controller.is_left(),
-                "rumble_enabled": controller.rumble_enabled,
-            }
-
-            # Add base info fields for controllers that are not connected yet
             if controller.serial not in app["joydance_connections"]:
-                controller_info.update(BASE_CONTROLLER_STATE_INFO)
+                # Add base info fields for controllers that are not connected yet
+                controller_info = BASE_CONTROLLER_STATE_INFO.copy()
+                controller_info.update(await controller.get_state())
+            else:
+                controller_info = await app["joydance_connections"][controller.serial].get_state()
 
             app["controllers_info"][controller.serial].update(controller_info)
             controllers_info.append(controller_info)
@@ -68,6 +57,7 @@ async def update_controllers_info(app):
             continue
 
     return sorted(controllers_info, key=lambda x: (x["name"], x["color"], x["serial"]))
+
 
 async def connect_controller(app, ws, data) -> None:
     async def on_joydance_state_changed(serial, update_dict):

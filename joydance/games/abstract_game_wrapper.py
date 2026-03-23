@@ -16,20 +16,26 @@ class AbstractGameWrapper(ABC):
         on_game_message=None,
     ):
         if on_state_changed:
-            self.on_state_changed = on_state_changed
+            self._on_state_changed = on_state_changed
         if on_game_message:
-            self.on_game_message = on_game_message
+            self._on_game_message = on_game_message
+        self._state = {}
         self.host_port = self.get_random_port()
         self.console_conn = None
         self.reconnection_start_retry_delay = 1  # seconds
         self.reconnection_max_retry_delay = 30  # seconds
 
-    @staticmethod
-    async def on_state_changed(state):  # pylint: disable=method-hidden
-        pass
+    async def on_state_changed(self, serial, state):  # pylint: disable=method-hidden
+        self._state.update(state)
+        await self._on_state_changed(serial, self._state)
 
     async def on_game_message(self, message):  # pylint: disable=method-hidden
-        pass
+        await self._on_game_message(message)
+
+    async def get_state(self, pull_new_data=True):
+        if pull_new_data or len(self._state) == 0:
+            self._state.update(await self.controller.get_state(pull_new_data))
+        return self._state.copy()
 
     def set_rumble(self, enabled):
         self.controller.set_rumble(enabled)

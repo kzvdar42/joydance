@@ -14,6 +14,21 @@ class AbstractControllerWrapper(ABC):
     def __init__(self):
         self._available_shortcuts = set()
         self.rumble_enabled = False
+        self._state = {}
+
+    def _initialize_state(self):
+        self._state = {
+            "vendor_id": self.vendor_id,
+            "product_id": self.product_id,
+            "serial": self.serial,
+            "name": self.name,
+            "rumble_enabled": self.rumble_enabled,
+        }
+
+    async def get_state(self, pull_new_data=True):
+        if pull_new_data or "battery_level" not in self._state:
+            self._state["battery_level"] = await self.battery_level()
+        return self._state.copy()
 
     @property
     def available_shortcuts(self):
