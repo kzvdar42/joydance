@@ -388,6 +388,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
             if message.get("isPopup") == 1:
                 self.is_input_allowed = True
+            # Disable UI for non-main player with SimplePhoneUiData
+            elif message.get("setupData", {}).get("__class") == "JD_SimplePhoneUiData":
+                logger.debug("%s: JD_SimplePhoneUiData!!!!!!!!!!!!!!", self.controller.serial)
+                self.is_input_allowed = False
             else:
                 self.is_input_allowed = message.get("inputSetup", {}).get("isEnabled", 0) == 1
 
