@@ -34,6 +34,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             }
         )
         self.current_carousel_type = "main"
+        self._pre_pop_up_carousel_type = "main"
         self.coach_id = 0
         self.num_coaches = 0
         self.is_in_lobby = False
@@ -96,6 +97,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
         elif __class == "InputSetup_ConsoleCommandData":
             await self.parse_carousel_position_setup_data(message_dict)
 
+        elif __class == "JD_ClosePopup_ConsoleCommandData":
+            self.current_carousel_type = self._pre_pop_up_carousel_type
+
         elif __class == "JD_PhoneUiSetupData":
             await self.parse_phone_setup_data(message_dict)
 
@@ -129,15 +133,8 @@ class JustDanceGameV1(JustDanceGameAbstract):
         self.is_on_recap = False
         self.is_in_lobby = False
 
-        if (
-            data.get("isPopup")
-            or data.get("setupData", {})
-            .get("mainCarousel", {})
-            .get("rows", [{}])[0]
-            .get("items", [{}])[0]
-            .get("title")
-            == "[icon:GEN-VALIDATE] Quit"
-        ):
+        if data.get("isPopup"):
+            self._pre_pop_up_carousel_type = self.current_carousel_type
             self.current_carousel_type = "popup"
         elif data.get("setupData", {}).get("lobbySetup"):
             self.current_carousel_type = "lobby"
