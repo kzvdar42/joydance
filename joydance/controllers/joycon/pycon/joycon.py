@@ -49,6 +49,10 @@ class JoyCon:
         self._input_hooks = []
         self._input_report = bytes(self._INPUT_REPORT_SIZE)
         self._packet_number = 0
+        self.color_body = (128, 128, 128)
+        self.color_btn = (255, 255, 255)
+        self.deadzone = 0
+        self._set_default_stick_calibration()
         self.set_accel_calibration((0, 0, 0), (1, 1, 1))
 
         # connect to joycon
@@ -214,31 +218,48 @@ class JoyCon:
         return report[7:size + 7]
 
     def _read_joycon_data(self):
-        color_data = self._spi_flash_read(0x6050, 6)
-        self.color_body = tuple(color_data[:3])
-        self.color_btn = tuple(color_data[3:])
+        try:
+            color_data = self._spi_flash_read(0x6050, 6)
+            self.color_body = tuple(color_data[:3])
+            self.color_btn = tuple(color_data[3:])
+        except Exception:
+            logger.warning("%s: Error reading JoyCon colors; using defaults", self.serial)
+            logger.debug("%s: Error reading JoyCon colors", self.serial, exc_info=True)
 
-        self._read_stick_calibration_data()
+        try:
+            self._read_stick_calibration_data()
+        except Exception:
+            logger.warning("%s: Error reading stick calibration data; using defaults", self.serial)
+            logger.debug("%s: Error reading stick calibration data", self.serial, exc_info=True)
+            self._set_default_stick_calibration()
 
-        buf = self._spi_flash_read(0x6086 if self.is_left() else 0x6098, 16)
-        self.deadzone = (buf[4] << 8) & 0xF00 | buf[3]
+        try:
+            buf = self._spi_flash_read(0x6086 if self.is_left() else 0x6098, 16)
+            self.deadzone = (buf[4] << 8) & 0xF00 | buf[3]
+        except Exception:
+            logger.warning("%s: Error reading stick device parameters; using defaults", self.serial)
+            logger.debug("%s: Error reading stick device parameters", self.serial, exc_info=True)
 
-        # user IME data
-        if self._spi_flash_read(0x8026, 2) == b"\xB2\xA1":
-            imu_cal = self._spi_flash_read(0x8028, 24)
-        # factory IME data
-        else:
-            imu_cal = self._spi_flash_read(0x6020, 24)
+        try:
+            # user IMU data
+            if self._spi_flash_read(0x8026, 2) == b"\xB2\xA1":
+                imu_cal = self._spi_flash_read(0x8028, 24)
+            # factory IMU data
+            else:
+                imu_cal = self._spi_flash_read(0x6020, 24)
 
-        self.set_accel_calibration((
-            self._to_int16le_from_2bytes(imu_cal[0], imu_cal[1]),
-            self._to_int16le_from_2bytes(imu_cal[2], imu_cal[3]),
-            self._to_int16le_from_2bytes(imu_cal[4], imu_cal[5]),
-        ), (
-            self._to_int16le_from_2bytes(imu_cal[6], imu_cal[7]),
-            self._to_int16le_from_2bytes(imu_cal[8], imu_cal[9]),
-            self._to_int16le_from_2bytes(imu_cal[10], imu_cal[11]),
-        ))
+            self.set_accel_calibration((
+                self._to_int16le_from_2bytes(imu_cal[0], imu_cal[1]),
+                self._to_int16le_from_2bytes(imu_cal[2], imu_cal[3]),
+                self._to_int16le_from_2bytes(imu_cal[4], imu_cal[5]),
+            ), (
+                self._to_int16le_from_2bytes(imu_cal[6], imu_cal[7]),
+                self._to_int16le_from_2bytes(imu_cal[8], imu_cal[9]),
+                self._to_int16le_from_2bytes(imu_cal[10], imu_cal[11]),
+            ))
+        except Exception:
+            logger.warning("%s: Error reading IMU calibration data; using defaults", self.serial)
+            logger.debug("%s: Error reading IMU calibration data", self.serial, exc_info=True)
 
     def _read_stick_calibration_data(self):
         user_stick_cal_addr = 0x8012 if self.is_left() else 0x801D
