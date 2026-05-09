@@ -264,12 +264,7 @@ class JoyCon:
             logger.debug(f"%s: Error reading factory stick calibration data", self.serial, exc_info=True)
 
         if buf is None:
-            # Some Third Party JoyCons don't have stick calibration data
-            # Use values from my JoyCons as fallback
-            if self.is_left():
-                self.stick_cal = [1066, 807, 1943, 2377, 956, 1014]
-            else:
-                self.stick_cal = [1029, 1022, 2176, 1618, 936, 821]
+            self._set_default_stick_calibration()
             return
 
         self.stick_cal = [0] * 6
@@ -286,6 +281,14 @@ class JoyCon:
         self.stick_cal[4 if self.is_left() else 0] = (buf[7] << 8) & 0xF00 | buf[6]
         # Y Axis Min below center
         self.stick_cal[5 if self.is_left() else 1] = (buf[8] << 4) | (buf[7] >> 4)
+
+    def _set_default_stick_calibration(self):
+        # Some third-party or half-awake JoyCons do not return calibration data.
+        # Use measured fallback values so the controller can still initialize.
+        if self.is_left():
+            self.stick_cal = [1066, 807, 1943, 2377, 956, 1014]
+        else:
+            self.stick_cal = [1029, 1022, 2176, 1618, 936, 821]
 
     def _setup_sensors(self):
         logger.debug(f"{self.serial}: _setup_sensors")
