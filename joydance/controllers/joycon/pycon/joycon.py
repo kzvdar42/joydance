@@ -1,3 +1,5 @@
+import asyncio
+import functools
 import time
 import threading
 from typing import Optional, Tuple
@@ -8,6 +10,8 @@ import hid
 
 from .constants import (JOYCON_L_PRODUCT_ID, JOYCON_PRODUCT_IDS,
                         JOYCON_R_PRODUCT_ID, JOYCON_VENDOR_ID)
+from joydance.controllers.hid_executor import HID_EXECUTOR
+from joydance.utils.errors import ControllerConnectionError
 
 
 logger = logging.getLogger(__name__)
@@ -16,8 +20,10 @@ logger = logging.getLogger(__name__)
 # TODO: disconnect, power off sequence
 class JoyCon:
     _INPUT_REPORT_SIZE = 49
+    _COMMAND_OUTPUT_REPORT_SIZE = 0x31
+    _BASIC_OUTPUT_REPORT_SIZE = 0x0A
     _INPUT_REPORT_PERIOD = 0.015
-    _INPUT_READ_TIMEOUT = 100
+    _INPUT_READ_TIMEOUT_MS = 100
     _RUMBLE_DATA = b'\x00\x01\x40\x40\x00\x01\x40\x40'
 
     vendor_id: int
@@ -43,6 +49,15 @@ class JoyCon:
         self._rumble_enabled = True
         self._first_connection_timeout = 1
         self.reconnect_timeout = 1
+        # Max attempts for SPI read + sensor setup after HID open (each failure sleeps reconnect_timeout)
+        self._max_setup_attempts = 10
+        # Seconds to wait for a subcommand reply. A JoyCon emits 0x30 reports at
+        # about 60Hz, so report-count based timeouts expire too quickly.
+        self._subcommand_response_timeout = 5.0
+        self._subcommand_resend_interval = 0.25
+        self._first_report_attempts = 30
+        # Seconds to wait for first 0x30 input report after setup (thread must publish is_connected)
+        self._first_input_report_timeout = 5.0
 
         # setup internal state
         self._rumble_data = self._RUMBLE_DATA
@@ -55,37 +70,384 @@ class JoyCon:
         self._set_default_stick_calibration()
         self.set_accel_calibration((0, 0, 0), (1, 1, 1))
 
-        # connect to joycon
+        # connection state
         self._joycon_device = None
         self._update_input_report_thread = None
         self.preconnect_event = threading.Event()
         self.is_connected = threading.Event()
         self._should_run = threading.Event()
-        self._connect()
+        self._connect_lock = asyncio.Lock()
+        self._connection_lifecycle_lock = threading.Lock()
+        self._connection_generation = 0
+        self._active_connection_cancel = None
+        self._closed = False
+        self._loop = None
+        self._reconnect_future = None
+        self._was_state_initialized = False
 
-    def _connect(self):
-        """Handle the connection process"""
-        # connect to joycon
-        self.preconnect_event.clear()
-        self.is_connected.clear()
-        self._joycon_device = self._open(self.vendor_id, self.product_id, serial=self.serial)
-        # Sleep to allow the device to settle
-        time.sleep(self._first_connection_timeout)
-        while True:
+    @property
+    def was_state_initialized(self):
+        """Returns true if internal state was read from hid and populated."""
+        return self._was_state_initialized
+
+    def _get_connection_generation(self):
+        with self._connection_lifecycle_lock:
+            return self._connection_generation
+
+    def _ensure_connection_request_is_current(self, request_generation):
+        with self._connection_lifecycle_lock:
+            is_current = request_generation == self._connection_generation
+        if not is_current:
+            raise ControllerConnectionError(
+                f"{id(self)} {self.serial}: connection request was stopped"
+            )
+
+    def _begin_connection_attempt(self, request_generation, allow_reopen):
+        with self._connection_lifecycle_lock:
+            if request_generation != self._connection_generation:
+                raise ControllerConnectionError(
+                    f"{id(self)} {self.serial}: connection request was stopped"
+                )
+            if self._closed:
+                if not allow_reopen:
+                    raise ControllerConnectionError(
+                        f"{id(self)} {self.serial}: controller is closed"
+                    )
+                reopening_after_close = True
+                self._closed = False
+            else:
+                reopening_after_close = False
+
+            connection_cancel = threading.Event()
+            self._active_connection_cancel = connection_cancel
+            return (
+                self._connection_generation,
+                connection_cancel,
+                reopening_after_close,
+            )
+
+    def _is_connection_attempt_current(self, connection_generation, connection_cancel):
+        with self._connection_lifecycle_lock:
+            return (
+                not self._closed
+                and connection_generation == self._connection_generation
+                and self._active_connection_cancel is connection_cancel
+                and not connection_cancel.is_set()
+            )
+
+    def _ensure_connection_attempt_is_current(
+        self,
+        connection_generation,
+        connection_cancel,
+    ):
+        if not self._is_connection_attempt_current(
+            connection_generation,
+            connection_cancel,
+        ):
+            raise ControllerConnectionError(
+                f"{id(self)} {self.serial}: connection attempt was stopped"
+            )
+
+    def _ensure_active_connection_is_not_stopped(self):
+        with self._connection_lifecycle_lock:
+            connection_cancel = self._active_connection_cancel
+            is_stopped = self._closed or (
+                connection_cancel is not None and connection_cancel.is_set()
+            )
+        if is_stopped:
+            raise ControllerConnectionError(
+                f"{id(self)} {self.serial}: connection attempt was stopped"
+            )
+
+    def _wait_for_connection(
+        self,
+        connection_generation,
+        connection_cancel,
+        timeout,
+    ):
+        deadline = time.monotonic() + timeout
+        while not connection_cancel.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if self.is_connected.wait(min(0.1, remaining)):
+                return True
+        self._ensure_connection_attempt_is_current(
+            connection_generation,
+            connection_cancel,
+        )
+        return False
+
+    async def _run_in_thread(self, func, *args):
+        """Run a blocking call in a thread and finish safely on cancellation."""
+        loop = asyncio.get_running_loop()
+        task = asyncio.ensure_future(
+            loop.run_in_executor(HID_EXECUTOR, functools.partial(func, *args))
+        )
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            with self._connection_lifecycle_lock:
+                if self._active_connection_cancel is not None:
+                    self._active_connection_cancel.set()
             try:
-                self._read_joycon_data()
-                self._setup_sensors()
-                break
-            except Exception as e:
-                logger.debug(f"{id(self)} {self.serial}: _connect {e=}", exc_info=True)
-                time.sleep(self.reconnect_timeout)
-        self.preconnect_event.set()
-        self._should_run.set()
-        # start talking with the joycon in a daemon thread
-        if self._update_input_report_thread is None:
-            self._update_input_report_thread = threading.Thread(target=self._update_input_report, daemon=True)
-            self._update_input_report_thread.start()
-            self.is_connected.wait()
+                await asyncio.shield(task)
+            except Exception:
+                logger.debug(
+                    "%s: blocking reconnect step failed after cancellation",
+                    self.serial,
+                    exc_info=True,
+                )
+            raise
+
+    async def connect(self):
+        """Connect to the JoyCon."""
+        request_generation = self._get_connection_generation()
+        return await self._connect(request_generation, allow_reopen=True)
+
+    async def _connect(self, request_generation, allow_reopen):
+        self._loop = asyncio.get_running_loop()
+        was_queued = self._connect_lock.locked()
+        async with self._connect_lock:
+            self._ensure_connection_request_is_current(request_generation)
+            if was_queued and self.is_connected.is_set():
+                return True
+            connection_generation = None
+            connection_cancel = None
+            reopening_after_close = False
+            is_connected = False
+            connection_cancelled = False
+            try:
+                (
+                    connection_generation,
+                    connection_cancel,
+                    reopening_after_close,
+                ) = self._begin_connection_attempt(request_generation, allow_reopen)
+                with self._connection_lifecycle_lock:
+                    if (
+                        self._closed
+                        or connection_generation != self._connection_generation
+                        or self._active_connection_cancel is not connection_cancel
+                        or connection_cancel.is_set()
+                    ):
+                        raise ControllerConnectionError(
+                            f"{id(self)} {self.serial}: connection attempt was stopped"
+                        )
+                    self.preconnect_event.clear()
+                    self.is_connected.clear()
+
+                if reopening_after_close:
+                    previous_reader = self._update_input_report_thread
+                    if previous_reader is not None and previous_reader.is_alive():
+                        await self._run_in_thread(
+                            previous_reader.join,
+                            self._first_input_report_timeout,
+                        )
+                        self._ensure_connection_attempt_is_current(
+                            connection_generation,
+                            connection_cancel,
+                        )
+                        if previous_reader.is_alive():
+                            raise ControllerConnectionError(
+                                f"{id(self)} {self.serial}: previous input reader did not stop"
+                            )
+
+                if self._joycon_device:
+                    try:
+                        await self._run_in_thread(self._close)
+                    except Exception:
+                        logger.debug("%s: error closing device before reconnect", self.serial, exc_info=True)
+                    self._ensure_connection_attempt_is_current(
+                        connection_generation,
+                        connection_cancel,
+                    )
+
+                for attempt in range(self._max_setup_attempts):
+                    self._ensure_connection_attempt_is_current(
+                        connection_generation,
+                        connection_cancel,
+                    )
+                    try:
+                        await self._run_in_thread(
+                            self._connect_hid,
+                            connection_generation,
+                            connection_cancel,
+                        )
+                        self._ensure_connection_attempt_is_current(
+                            connection_generation,
+                            connection_cancel,
+                        )
+                        break
+                    except Exception as exc:
+                        # A close while HID setup was running must not be treated as
+                        # an ordinary setup failure followed by another open attempt.
+                        self._ensure_connection_attempt_is_current(
+                            connection_generation,
+                            connection_cancel,
+                        )
+                        logger.debug("%s %s: error in _connect_hid", id(self), self.serial, exc_info=True)
+                        if attempt >= self._max_setup_attempts - 1:
+                            await self._run_in_thread(self._close)
+                            self._ensure_connection_attempt_is_current(
+                                connection_generation,
+                                connection_cancel,
+                            )
+                            raise ControllerConnectionError(
+                                f"{id(self)} {self.serial}: connect setup failed after "
+                                f"{self._max_setup_attempts} attempts"
+                            ) from exc
+                        await asyncio.sleep(self.reconnect_timeout)
+                        self._ensure_connection_attempt_is_current(
+                            connection_generation,
+                            connection_cancel,
+                        )
+
+                with self._connection_lifecycle_lock:
+                    if (
+                        self._closed
+                        or connection_generation != self._connection_generation
+                        or self._active_connection_cancel is not connection_cancel
+                        or connection_cancel.is_set()
+                    ):
+                        raise ControllerConnectionError(
+                            f"{id(self)} {self.serial}: connection attempt was stopped"
+                        )
+                    self.preconnect_event.set()
+                    self._should_run.set()
+
+                started_new_input_thread = False
+                if (
+                    self._update_input_report_thread is None
+                    or not self._update_input_report_thread.is_alive()
+                ):
+                    self._update_input_report_thread = threading.Thread(
+                        target=self._update_input_report, daemon=True,
+                    )
+                    self._update_input_report_thread.start()
+                    started_new_input_thread = True
+                self._ensure_connection_attempt_is_current(
+                    connection_generation,
+                    connection_cancel,
+                )
+                is_connected = await self._run_in_thread(
+                    self._wait_for_connection,
+                    connection_generation,
+                    connection_cancel,
+                    self._first_input_report_timeout,
+                )
+                self._ensure_connection_attempt_is_current(
+                    connection_generation,
+                    connection_cancel,
+                )
+                if not is_connected:
+                    # Only tear down the reader thread if this connect attempt started it.
+                    # On reconnect, keep _should_run so the existing thread can recover via OSError/reconnect.
+                    if started_new_input_thread:
+                        self._should_run.clear()
+                    try:
+                        await self._run_in_thread(self._close)
+                    except Exception:
+                        logger.debug("%s: error closing device after input report timeout", self.serial, exc_info=True)
+                    raise ControllerConnectionError(
+                        f"{id(self)} {self.serial}: timeout waiting for first input report (0x30)"
+                    )
+            except asyncio.CancelledError:
+                connection_cancelled = True
+                raise
+            finally:
+                connection_stopped = False
+                if connection_cancel is not None:
+                    with self._connection_lifecycle_lock:
+                        connection_stopped = (
+                            connection_cancelled
+                            or connection_generation != self._connection_generation
+                            or self._active_connection_cancel is not connection_cancel
+                            or connection_cancel.is_set()
+                            or self._closed
+                        )
+                        if connection_stopped:
+                            self._should_run.clear()
+                            self.is_connected.clear()
+                        if not is_connected:
+                            self.preconnect_event.set()
+                        if self._active_connection_cancel is connection_cancel:
+                            self._active_connection_cancel = None
+
+                if connection_stopped:
+                    try:
+                        self._close()
+                    except Exception:
+                        logger.debug(
+                            "%s: error closing device after stopped connection attempt",
+                            self.serial,
+                            exc_info=True,
+                        )
+            return is_connected
+
+    def _connect_hid(self, connection_generation, connection_cancel):
+        self._ensure_connection_attempt_is_current(
+            connection_generation,
+            connection_cancel,
+        )
+        try:
+            joycon_device = self._open(
+                self.vendor_id,
+                self.product_id,
+                self.serial,
+            )
+
+            with self._connection_lifecycle_lock:
+                if (
+                    not self._closed
+                    and connection_generation == self._connection_generation
+                    and self._active_connection_cancel is connection_cancel
+                    and not connection_cancel.is_set()
+                ):
+                    self._joycon_device = joycon_device
+                    joycon_device = None
+
+            if joycon_device is not None:
+                try:
+                    joycon_device.close()
+                finally:
+                    self._ensure_connection_attempt_is_current(
+                        connection_generation,
+                        connection_cancel,
+                    )
+
+            if connection_cancel.wait(self._first_connection_timeout):
+                self._ensure_connection_attempt_is_current(
+                    connection_generation,
+                    connection_cancel,
+                )
+            self._ensure_connection_attempt_is_current(
+                connection_generation,
+                connection_cancel,
+            )
+            self._prepare_input_reports()
+            self._ensure_connection_attempt_is_current(
+                connection_generation,
+                connection_cancel,
+            )
+            self._wait_for_any_input_report()
+            self._ensure_connection_attempt_is_current(
+                connection_generation,
+                connection_cancel,
+            )
+            self._read_joycon_data()
+            self._ensure_connection_attempt_is_current(
+                connection_generation,
+                connection_cancel,
+            )
+            self._setup_sensors()
+            self._ensure_connection_attempt_is_current(
+                connection_generation,
+                connection_cancel,
+            )
+            self._was_state_initialized = True
+        except Exception:
+            self._close()
+            raise
 
     def _open(self, vendor_id, product_id, serial):
         try:
@@ -101,34 +463,70 @@ class JoyCon:
         return _joycon_device
 
     def _close(self):
-        if self._joycon_device:
-            self._joycon_device.close()
+        with self._connection_lifecycle_lock:
+            joycon_device = self._joycon_device
             self._joycon_device = None
+        if joycon_device:
+            joycon_device.close()
 
     def close(self):
         """Safely closes the connection without fully deleting the object"""
-        self._should_run.clear()
+        with self._connection_lifecycle_lock:
+            self._closed = True
+            self._connection_generation += 1
+            connection_cancel = self._active_connection_cancel
+            if connection_cancel is not None:
+                connection_cancel.set()
+            self._should_run.clear()
+            self.is_connected.clear()
+            self.preconnect_event.set()
+            reconnect_future = self._reconnect_future
+            joycon_device = self._joycon_device
+            self._joycon_device = None
+
+        if reconnect_future and not reconnect_future.done():
+            reconnect_future.cancel()
         try:
-            if self._joycon_device:
-                self._close()
+            if joycon_device:
+                joycon_device.close()
         except Exception:
             pass
 
     def disconnect_device(self):
         """Safely disconnect the device"""
-        self._should_run.clear()
-        self._write_output_report(b'\x01', b'\x06', b'\x00')
-        self._close()
+        try:
+            self._write_output_report(b'\x01', b'\x06', b'\x00')
+        finally:
+            self.close()
 
-    def reconnect(self):
+    async def reconnect(self):
         """Attempts to reconnect to the JoyCon"""
         try:
-            logger.debug(f"{id(self)} {self.serial}: reconnecting")
-            self._connect()
-            logger.debug(f"{id(self)} {self.serial}: reconnecting done")
+            logger.debug("%s %s: reconnecting", id(self), self.serial)
+            request_generation = self._get_connection_generation()
+            await self._connect(request_generation, allow_reopen=False)
+            logger.debug("%s %s: reconnecting done", id(self), self.serial)
             return True
-        except Exception:
+        except ControllerConnectionError as exc:
+            logger.debug("%s %s: reconnect failed: %s", id(self), self.serial, exc)
             return False
+        except Exception:
+            logger.exception("%s %s: reconnect failed", id(self), self.serial)
+            return False
+
+    def _schedule_reconnect_from_reader(self):
+        with self._connection_lifecycle_lock:
+            if self._closed or not self._should_run.is_set():
+                return
+            if self._reconnect_future and not self._reconnect_future.done():
+                return
+            if not self._loop or self._loop.is_closed():
+                logger.debug("%s: cannot schedule reconnect; event loop is unavailable", self.serial)
+                return
+            self._reconnect_future = asyncio.run_coroutine_threadsafe(
+                self.reconnect(),
+                self._loop,
+            )
 
     def _update_input_report(self):
         while self._should_run.is_set():
@@ -138,9 +536,9 @@ class JoyCon:
                     # Check again if the thread should run
                     if not self._should_run.is_set():
                         return
-                    if not self.reconnect():
-                        time.sleep(self.reconnect_timeout)
-                        continue
+                    self._schedule_reconnect_from_reader()
+                    time.sleep(self.reconnect_timeout)
+                    continue
 
                 report = [0]
                 # TODO, handle input reports of type 0x21 and 0x3f
@@ -149,15 +547,14 @@ class JoyCon:
                     if report is None:
                         raise OSError("joycon_device is None!")
 
-                self._input_report = report
-                self.is_connected.set()
-
-                for callback in self._input_hooks:
-                    callback(self)
+                self._publish_input_report(report)
             except OSError:
                 logger.exception("%s %s: connection lost to hid device", id(self), self.serial)
                 self.is_connected.clear()
-                self._joycon_device = None
+                try:
+                    self._close()
+                except Exception:
+                    logger.debug("%s: error closing device after read failure", self.serial, exc_info=True)
                 time.sleep(self.reconnect_timeout)
             except Exception:
                 logger.exception("%s %s: Unexpected error in input report:", id(self), self.serial)
@@ -167,47 +564,174 @@ class JoyCon:
     def _read_input_report(self) -> bytes:
         if self._joycon_device:
             return bytes(self._joycon_device.read(
-                max_length=self._INPUT_REPORT_SIZE, timeout_ms=self._INPUT_READ_TIMEOUT
+                max_length=self._INPUT_REPORT_SIZE, timeout_ms=self._INPUT_READ_TIMEOUT_MS
             ))
+
+    def _publish_input_report(self, report):
+        if len(report) == 0 or report[0] != 0x30:
+            return
+
+        with self._connection_lifecycle_lock:
+            if self._closed or not self._should_run.is_set():
+                return
+            self._input_report = report
+            self.is_connected.set()
+            input_hooks = tuple(self._input_hooks)
+
+        for callback in input_hooks:
+            callback(self)
 
     def _write_output_report(self, command, subcommand, argument):
         if not self._joycon_device:
-            logger.debug("%s: Wanted to write output report, but JoyCon is not connected", self.serial)
+            logger.debug(
+                "%s: Wanted to write output report, but JoyCon is not connected",
+                self.serial,
+            )
             return
 
-        # TODO: add documentation
-        logger.debug("%s: JoyCon writing output report is_with_rumble: %s", self.serial, self._rumble_data != JoyCon._RUMBLE_DATA)
-        self._joycon_device.write(b''.join([
-            command,
-            self._packet_number.to_bytes(1, byteorder='little'),
-            self._rumble_data,
-            subcommand,
-            argument,
-        ]))
+        packet_number = self._packet_number.to_bytes(1, byteorder='little')
+        if command == b'\x10':
+            report = b''.join([command, packet_number, self._rumble_data])
+            expected_report_size = self._BASIC_OUTPUT_REPORT_SIZE
+        else:
+            report = b''.join([
+                command,
+                packet_number,
+                self._rumble_data,
+                subcommand,
+                argument,
+            ])
+            expected_report_size = (
+                self._COMMAND_OUTPUT_REPORT_SIZE
+                if command == b'\x01'
+                else len(report)
+            )
+
+        if len(report) > expected_report_size:
+            raise ValueError(
+                f"Output report {command.hex()} is {len(report)} bytes, "
+                f"expected at most {expected_report_size}"
+            )
+
+        report = report.ljust(expected_report_size, b'\x00')
+        logger.debug(
+            "%s: JoyCon writing output report report_id=%s len=%s is_with_rumble=%s",
+            self.serial,
+            command.hex(),
+            len(report),
+            self._rumble_data != JoyCon._RUMBLE_DATA,
+        )
+        bytes_written = self._joycon_device.write(report)
+        if bytes_written is not None and bytes_written != len(report):
+            error = None
+            if hasattr(self._joycon_device, "error"):
+                try:
+                    error = self._joycon_device.error()
+                except Exception:
+                    error = None
+            logger.warning(
+                "%s: JoyCon output report write returned %s, expected %s; hid_error=%s",
+                self.serial,
+                bytes_written,
+                len(report),
+                error,
+            )
         self._packet_number = (self._packet_number + 1) & 0xF
 
-    def _send_subcmd_get_response(self, subcommand, argument, max_attempts=1000) -> Tuple[bool, bytes]:
+    def _send_subcmd_get_response(
+        self,
+        subcommand,
+        argument,
+        timeout=None,
+        response_validator=None,
+    ) -> Tuple[bool, bytes]:
         # TODO: handle subcmd when daemon is running
+        if timeout is None:
+            timeout = self._subcommand_response_timeout
+
         self._write_output_report(b'\x01', subcommand, argument)
 
-        report = [0]
+        deadline = time.monotonic() + timeout
+        next_resend = time.monotonic() + self._subcommand_resend_interval
         num_attempts = 0
-        while (len(report) == 0 or report[0] != 0x21):  # TODO, avoid this, await daemon instead
+        empty_reports = 0
+        seen_report_ids = {}
+        seen_subcmd_replies = {}
+        while True:  # TODO, avoid this, await daemon instead
+            self._ensure_active_connection_is_not_stopped()
             report = self._read_input_report()
             num_attempts += 1
-            if num_attempts > max_attempts:
-                raise Exception(f"Timeout reading input report after {max_attempts} attempts")
+            now = time.monotonic()
+            if now >= deadline:
+                raise Exception(
+                    f"Timeout reading input report after {timeout:.2f}s/{num_attempts} attempts; "
+                    f"empty_reports={empty_reports}; "
+                    f"seen_report_ids={seen_report_ids}; "
+                    f"seen_subcmd_replies={seen_subcmd_replies}"
+                )
 
-        # TODO, remove, see the todo above
-        assert report[1:2] != subcommand, "THREAD carefully"
+            if not report:
+                empty_reports += 1
+            elif report[0] != 0x21:
+                seen_report_ids[report[0]] = seen_report_ids.get(report[0], 0) + 1
+            else:
+                response = report[13:]
+                if len(response) < 2 or response[1:2] != subcommand:
+                    if len(response) >= 2:
+                        seen_subcmd_replies[response[1]] = seen_subcmd_replies.get(response[1], 0) + 1
+                # Check if response is valid for our request or some "stale" response for other request
+                elif response_validator and not response_validator(response):
+                    logger.debug(
+                        "%s: ignoring stale subcommand response for %s: %s",
+                        self.serial,
+                        subcommand.hex(),
+                        response.hex(),
+                    )
+                else:
+                    # TODO: determine if the cut bytes are worth anything
+                    return response[0] & 0x80, response  # (ack, data)
 
-        # TODO: determine if the cut bytes are worth anything
-        return report[13] & 0x80, report[13:]  # (ack, data)
+            if now >= next_resend:
+                self._write_output_report(b'\x01', subcommand, argument)
+                next_resend = now + self._subcommand_resend_interval
+
+    def _wait_for_any_input_report(self):
+        empty_reports = 0
+        for _ in range(self._first_report_attempts):
+            self._ensure_active_connection_is_not_stopped()
+            report = self._read_input_report()
+            if not report:
+                empty_reports += 1
+                continue
+            return report
+
+        raise ControllerConnectionError(
+            f"{id(self)} {self.serial}: no input reports after full-mode setup; "
+            f"empty_reports={empty_reports}"
+        )
+
+    def _prepare_input_reports(self):
+        """Switch sends this after every connection, then asks for full report mode.
+
+        Full mode is required before SPI reads reliably return input report 0x21.
+        """
+        self._write_output_report(b'\x01', b'\x08', b'\x00')
+        time.sleep(0.02)
+        self._write_output_report(b'\x01', b'\x03', b'\x30')
+        time.sleep(0.02)
 
     def _spi_flash_read(self, address, size) -> bytes:
         assert size <= 0x1d
         argument = address.to_bytes(4, "little") + size.to_bytes(1, "little")
-        ack, report = self._send_subcmd_get_response(b'\x10', argument)
+
+        def is_matching_spi_flash_read_response(response):
+            return len(response) >= 7 and response[2:7] == argument
+
+        ack, report = self._send_subcmd_get_response(
+            b'\x10',
+            argument,
+            response_validator=is_matching_spi_flash_read_response,
+        )
         if not ack:
             raise IOError(f"After SPI read @ {address:#06x}: got NACK")
 
@@ -272,17 +796,17 @@ class JoyCon:
                 if b != 0xFF:
                     use_user_data = True
                     break
-        except Exception as e:
-            logger.warning(f"%s: Error reading user stick calibration data", self.serial)
-            logger.debug(f"%s: Error reading user stick calibration data", self.serial, exc_info=True)
+        except Exception:
+            logger.warning("%s: Error reading user stick calibration data", self.serial)
+            logger.debug("%s: Error reading user stick calibration data", self.serial, exc_info=True)
 
         try:
             if not use_user_data:
                 factory_stick_cal_addr = 0x603D if self.is_left() else 0x6046
                 buf = self._spi_flash_read(factory_stick_cal_addr, 9)
-        except Exception as e:
-            logger.warning(f"%s: Error reading factory stick calibration data", self.serial)
-            logger.debug(f"%s: Error reading factory stick calibration data", self.serial, exc_info=True)
+        except Exception:
+            logger.warning("%s: Error reading factory stick calibration data", self.serial)
+            logger.debug("%s: Error reading factory stick calibration data", self.serial, exc_info=True)
 
         if buf is None:
             self._set_default_stick_calibration()
@@ -312,14 +836,14 @@ class JoyCon:
             self.stick_cal = [1029, 1022, 2176, 1618, 936, 821]
 
     def _setup_sensors(self):
-        logger.debug(f"{self.serial}: _setup_sensors")
+        logger.debug("%s: _setup_sensors", self.serial)
         # Enable 6 axis sensors
         self._write_output_report(b'\x01', b'\x40', b'\x01')
         # It needs delta time to update the setting
         time.sleep(0.02)
         # Change format of input report
         self._write_output_report(b'\x01', b'\x03', b'\x30')
-        logger.debug(f"{self.serial}: _setup_sensors done")
+        logger.debug("%s: _setup_sensors done", self.serial)
 
     @staticmethod
     def _to_int16le_from_2bytes(hbytebe, lbytebe):
@@ -634,7 +1158,7 @@ class JoyCon:
             ((flashing_pattern & 0xF) << 4).to_bytes(1, byteorder='little'))
 
     def set_player_lamp(self, pattern: int):
-        logger.debug(f"{id(self)} {self.serial}: set_player_lamp {pattern}")
+        logger.debug("%s %s: set_player_lamp %s", id(self), self.serial, pattern)
         self._write_output_report(
             b'\x01', b'\x30',
             pattern.to_bytes(1, byteorder='little'))

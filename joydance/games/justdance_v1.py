@@ -1,10 +1,9 @@
 from .justdance_abstract import JustDanceGameAbstract
 from collections import defaultdict
-import asyncio
 import json
 import logging
-from urllib.parse import urlparse
-import websockets
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 from joydance.constants import (
     WS_SUBPROTOCOLS,
     Command,
@@ -192,49 +191,31 @@ class JustDanceGameV1(JustDanceGameAbstract):
                     self.controller.available_shortcuts = shortcuts_identifiers
 
     async def connect_ws(self):
-        server_hostname = None
-        ssl_context = None
-
-        if self.pairing_url.startswith("ws://192.168.") or self.pairing_url.startswith("ws://10."):
-            if self.console_conn:
-                server_hostname = self.console_conn.getpeername()[0]
-        elif not self.pairing_url.startswith("ws://"):
+        if not self.pairing_url.startswith("ws://"):
             logger.warning(
                 f"{self.controller.serial}: V1 connect_ws expects ws:// pairing_url, got {self.pairing_url}"
             )
-            tmp = urlparse(self.pairing_url)
-            server_hostname = tmp.hostname
 
         subprotocol = WS_SUBPROTOCOLS[WsSubprotocolVersion.V1.value]
         try:
             logger.debug(
-                f"{self.controller.serial}: V1 connecting to {self.pairing_url} with subprotocol {subprotocol}, sock: {'present' if self.console_conn else 'None'}, server_hostname: {server_hostname}"
+                f"{self.controller.serial}: V1 connecting to {self.pairing_url} with subprotocol {subprotocol}, sock: {'present' if self.console_conn else 'None'}"
             )
-            async with websockets.connect(
+            async with connect(
                 self.pairing_url,
                 subprotocols=[subprotocol],
                 sock=self.console_conn,
-                ssl=ssl_context,
+                ssl=None,
                 ping_timeout=None,
                 max_size=None,  # Disable message size limit to handle large JD_PhoneUiSetupData messages
-                server_hostname=(
-                    server_hostname
-                    if server_hostname
-                    else (
-                        urlparse(self.pairing_url).hostname
-                        if not self.pairing_url.startswith("ws://")
-                        else None
-                    )
-                ),
+                proxy=None,
             ) as websocket:
                 self.ws = websocket
-                # Set state on JD_PhoneDataCmdHandshakeContinue response
-                receive_task = asyncio.create_task(self._message_receive_loop())
+                # Set state only on JD_PhoneDataCmdHandshakeContinue response
+                await self.run_connection_tasks()
 
-                await asyncio.gather(self.send_hello(), self.tick(), self.send_command())
-
-        except websockets.ConnectionClosed as e:
-            logger.warning(f"{self.controller.serial}: V1 WebSocket connection closed: {e}")
+        except ConnectionClosed as e:
+            logger.warning("%s: V1 WebSocket connection closed: %s", self.controller.serial, e)
             await self.on_state_changed(
                 self.controller.serial,
                 {
@@ -244,10 +225,10 @@ class JustDanceGameV1(JustDanceGameAbstract):
             )
             await self.disconnect()
         except ConnectionRefusedError as e:
-            logger.error(f"{self.controller.serial}: V1 Connection refused for {self.pairing_url}: {e}")
+            logger.error("%s: V1 Connection refused for %s: %s", self.controller.serial, self.pairing_url, e)
             await self.on_state_changed(
                 self.controller.serial,
-                {"state": PairingState.ERROR_CONNECTION.value, "error_details": str(e)},
+                {"state": PairingState.ERROR_CONSOLE_CONNECTION.value, "error_details": str(e)},
             )
             await self.disconnect()
         except Exception as e:
@@ -263,20 +244,17 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 },
             )
             await self.disconnect()
-        finally:
-            if "receive_task" in locals() and not receive_task.done():
-                receive_task.cancel()
 
     async def _message_receive_loop(self):
         try:
             async for message_str in self.ws:
                 await self.on_message(message_str)
-        except websockets.ConnectionClosed:
+        except ConnectionClosed:
             logger.info(
                 "%s: V1 WebSocket connection closed while receiving messages.",
                 self.controller.serial,
             )
-        except Exception as e:
+        except Exception:
             logger.exception("%s: V1 Error in message receive loop.", self.controller.serial)
             await self.disconnect()
 

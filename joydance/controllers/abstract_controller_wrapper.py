@@ -11,7 +11,11 @@ class AbstractControllerWrapper(ABC):
     VENDOR_IDS = {}
     PRODUCT_IDS = {}
 
-    def __init__(self):
+    def __init__(self, vendor_id, product_id, serial, name):
+        self.vendor_id = vendor_id
+        self.product_id = product_id
+        self.serial = serial
+        self.name = name
         self._available_shortcuts = set()
         self.rumble_enabled = False
         self._state = {}
@@ -29,6 +33,14 @@ class AbstractControllerWrapper(ABC):
         if pull_new_data or "battery_level" not in self._state:
             self._state["battery_level"] = await self.battery_level()
         return self._state.copy()
+
+    async def connect(self):
+        """Connect the controller without blocking the event loop."""
+        raise NotImplementedError
+
+    async def reconnect(self):
+        """Attempts to reconnect the controller without blocking the event loop."""
+        raise NotImplementedError
 
     @property
     def available_shortcuts(self):
@@ -73,6 +85,8 @@ class AbstractControllerWrapper(ABC):
 
     async def set_player_led(self, player_id):
         """Sets the player LED to the corresponding pattern.
+
+        player_id can be set to 0 for "disconnected" pattern.
 
         Args:
             player_id (int): The player ID, starting from 1.

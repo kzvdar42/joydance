@@ -124,7 +124,7 @@ async def connect_controller(app, ws, data) -> None:
         app["joydance_connections"][serial] = game_connection
 
         logger.debug(f"{serial}: connect_controller - starting pair() task")
-        task = asyncio.create_task(game_connection.pair())
+        task = await game_connection.start_pair()
         task.add_done_callback(handle_task_exception)
         logger.debug(f"{serial}: connect_controller - completed successfully")
     except Exception as e:

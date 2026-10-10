@@ -1,9 +1,8 @@
 import logging
 from urllib.parse import urlparse
 import ssl
-import websockets
-
-import asyncio
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 from joydance.constants import (
     Command,
@@ -37,7 +36,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
             try:
                 ssl_context.load_verify_locations(cadata=self.tls_certificate)
             except Exception as e:
-                logger.error(f"{self.controller.serial}: V2 Failed to load TLS certificate: {e}")
+                logger.error("%s: V2 Failed to load TLS certificate: %s", self.controller.serial, e)
 
         # TODO: handle other private IPs
         if self.pairing_url.startswith("wss://192.168.") or self.pairing_url.startswith("wss://10."):
@@ -58,7 +57,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
             logger.debug(
                 f"{self.controller.serial}: V2 connecting to {self.pairing_url} with subprotocol {subprotocol}, server_hostname: {server_hostname}"
             )
-            async with websockets.connect(
+            async with connect(
                 self.pairing_url,
                 subprotocols=[subprotocol],
                 sock=self.console_conn,
@@ -66,15 +65,14 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 ping_timeout=None,
                 max_size=None,  # Disable message size limit to handle large JD_PhoneUiSetupData messages
                 server_hostname=server_hostname,
+                proxy=None,
             ) as websocket:
                 self.ws = websocket
-                # Set state on JD_PhoneDataCmdHandshakeContinue response
-                receive_task = asyncio.create_task(self._message_receive_loop())
+                # Set state only on JD_PhoneDataCmdHandshakeContinue response
+                await self.run_connection_tasks()
 
-                await asyncio.gather(self.send_hello(), self.tick(), self.send_command())
-
-        except websockets.ConnectionClosed as e:
-            logger.warning(f"{self.controller.serial}: V2 WebSocket connection closed: {e}")
+        except ConnectionClosed as e:
+            logger.warning("%s: V2 WebSocket connection closed: %s", self.controller.serial, e)
             await self.on_state_changed(
                 self.controller.serial,
                 {
@@ -84,10 +82,10 @@ class JustDanceGameV2(JustDanceGameAbstract):
             )
             await self.disconnect()
         except ConnectionRefusedError as e:
-            logger.error(f"{self.controller.serial}: V2 Connection refused for {self.pairing_url}: {e}")
+            logger.error("%s: V2 Connection refused for %s: %s", self.controller.serial, self.pairing_url, e)
             await self.on_state_changed(
                 self.controller.serial,
-                {"state": PairingState.ERROR_CONNECTION.value, "error_details": str(e)},
+                {"state": PairingState.ERROR_CONSOLE_CONNECTION.value, "error_details": str(e)},
             )
             await self.disconnect()
         except Exception as e:
@@ -103,15 +101,12 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 },
             )
             await self.disconnect()
-        finally:
-            if "receive_task" in locals() and not receive_task.done():
-                receive_task.cancel()
 
     async def _message_receive_loop(self):
         try:
             async for message_str in self.ws:
                 await self.on_message(message_str)
-        except websockets.ConnectionClosed:
+        except ConnectionClosed:
             logger.info(
                 "%s: V2 WebSocket connection closed while receiving messages.",
                 self.controller.serial,

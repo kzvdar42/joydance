@@ -16,22 +16,25 @@ class JoyConWrapper(AbstractControllerWrapper):
     PRODUCT_IDS = JOYCON_PRODUCT_IDS
 
     def __init__(self, vendor_id, product_id, serial):
-        super().__init__()
-        self.vendor_id = vendor_id
-        self.product_id = product_id
-        self.serial = serial
+        super().__init__(vendor_id, product_id, serial, name="JoyCon")
         self.joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
-        self.color_body = self.joycon.color_body
         self.rumble_enabled = True
-        self._available_shortcuts = set()
         self._is_battery_level_initialized = False
-        self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
         self._initialize_state()
 
-    def _initialize_state(self):
-        super()._initialize_state()
-        self._state["color"] = "#%02x%02x%02x" % self.color_body
-        self._state["is_left"] = self.is_left()
+    async def get_state(self, pull_new_data=True):
+        if pull_new_data or "battery_level" not in self._state:
+            self._state["battery_level"] = await self.battery_level()
+        if "color" not in self._state and self.joycon.was_state_initialized:
+            self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
+            self._state["name"] = self.name
+            self._state["color"] = "#%02x%02x%02x" % self.color_body
+            self._state["is_left"] = self.is_left()
+        return self._state.copy()
+
+    @property
+    def color_body(self):
+        return self.joycon.color_body
 
     @property
     def available_shortcuts(self):
@@ -66,7 +69,7 @@ class JoyConWrapper(AbstractControllerWrapper):
             try:
                 joycon_button = JoyConButton(event_type)
             except ValueError:
-                logger.warning(f"Unknown button event_type: {event_type} in get_latest_command")
+                logger.warning("Unknown button event_type: %s in get_latest_command", event_type)
                 continue
 
             cmds = []
@@ -144,13 +147,13 @@ class JoyConWrapper(AbstractControllerWrapper):
         """Closes the connection to the JoyCon."""
         self.joycon.close()
 
-    def reconnect(self):
-        """Attempts to reconnect to the JoyCon."""
-        try:
-            return self.joycon.reconnect()
-        except Exception as e:
-            logger.error(f"JoyConWrapper reconnect failed: {e}")
-            return False
+    async def connect(self):
+        """Connects to the JoyCon without blocking the event loop."""
+        return await self.joycon.connect()
+
+    async def reconnect(self):
+        """Attempts to reconnect to the JoyCon without blocking the event loop."""
+        return await self.joycon.reconnect()
 
     def is_connected(self):
         """Checks if the JoyCon is currently connected."""

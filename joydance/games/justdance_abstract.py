@@ -5,7 +5,8 @@ import json
 import logging
 from abc import ABC, abstractmethod
 import time
-import websockets
+from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 from joydance.constants import (
     ACCEL_ACQUISITION_FREQ_HZ,
     ACCEL_ACQUISITION_LATENCY,
@@ -26,6 +27,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     Implements all logic common to both protocol versions.
     Protocol-specific logic must be implemented in subclasses.
     """
+
+    @staticmethod
+    def _websocket_is_open(websocket):
+        return websocket is not None and websocket.state is State.OPEN
 
     def __init__(
         self,
@@ -63,6 +68,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.console_conn = None
         self.is_search_opened = False
         self.reconnection_task = None
+        self.pair_task = None
         self.should_reconnect = True
         self.requires_punch_pairing = False
 
@@ -134,7 +140,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         if data:
             msg["root"].update(data)
         try:
-            if self.ws and not self.ws.closed:
+            if self._websocket_is_open(self.ws):
                 await self.ws.send(json.dumps(msg, separators=(",", ":")))
             else:
                 logger.warning(
@@ -142,7 +148,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                     self.controller.serial,
                     __class,
                 )
-        except websockets.exceptions.ConnectionClosedError:
+        except ConnectionClosed:
             logger.warning(
                 "%s: Attempted to send message on a closed WebSocket: %s",
                 self.controller.serial,
@@ -198,6 +204,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 break
             tmp_duration = target_duration - dt
 
+    @abstractmethod
+    async def _message_receive_loop(self):
+        raise NotImplementedError
+
     async def tick(self):
         sleep_duration = FRAME_DURATION
         frames = 0
@@ -224,6 +234,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 continue
             last_time = time.time()
             frames = frames + 1 if frames < 3 else 1
+            # Collecting and sending accelerometer data
             await asyncio.gather(
                 self.sleep_approx(sleep_duration),
                 self.collect_accelerometer_data(),
@@ -243,34 +254,123 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             },
         )
 
+    async def start_pair(self):
+        await self.stop_pair()
+        self._state["connection_requested"] = True
+        self.pair_task = asyncio.create_task(self.pair())
+        self.pair_task.add_done_callback(self._clear_pair_task)
+        return self.pair_task
+
+    def _clear_pair_task(self, task):
+        if self.pair_task is task:
+            self.pair_task = None
+
+    async def stop_pair(self):
+        task = self.pair_task
+        if not task or task.done() or task is asyncio.current_task():
+            return
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            logger.debug("%s: Pairing task cancelled.", self.controller.serial)
+
+    async def run_connection_tasks(self):
+        await self.send_hello()
+        if not self._websocket_is_open(self.ws):
+            return
+
+        tasks = {
+            asyncio.create_task(self._message_receive_loop()),
+            asyncio.create_task(self.tick()),
+            asyncio.create_task(self.send_command()),
+        }
+
+        try:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            for task in pending:
+                task.cancel()
+
+            await asyncio.gather(*pending, return_exceptions=True)
+
+            for task in done:
+                task.result()
+
+            if self.ws:
+                await self.disconnect(should_reconnect=self.should_reconnect)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def disconnect(self, should_reconnect = True):
         self.should_reconnect = should_reconnect
-        if not self.is_connected:
-            return
-        if self.ws and not self.ws.closed:
-            await self.ws.close()
+        self._state["connection_requested"] = should_reconnect
+        if not should_reconnect:
+            await self.stop_reconnection()
+            await self.stop_pair()
+
+        was_connected = self.is_connected
+        old_ws = self.ws
         self.ws = None
-        logger.debug("%s: Disconnected", self.controller.serial)
+        had_ws = old_ws is not None
         self.is_connected = False
-        # set to "disconnected" pattern
-        await self.controller.set_player_led(0)
-        await self.on_state_changed(self.controller.serial, {"state": PairingState.DISCONNECTED.value})
-        if self.should_reconnect and not self.reconnection_task:
+        # A new connection may open a pause menu without repeating the stop-scoring message.
+        self.should_start_accelerometer = False
+        self.is_input_allowed = False
+        self.accel_data.clear()
+
+        if (
+            self.should_reconnect
+            and not self.reconnection_task
+            and (was_connected or had_ws or not self.controller.is_connected())
+        ):
             self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
+
+        # Finish closing and notifying even if the owning connection loop is cancelled.
+        cleanup = asyncio.create_task(
+            self._finish_disconnect(old_ws, was_connected or not should_reconnect)
+        )
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _finish_disconnect(self, old_ws, notify_disconnected):
+        try:
+            if old_ws is not None and old_ws.state is not State.CLOSED:
+                await old_ws.close()
+        finally:
+            if notify_disconnected:
+                logger.debug("%s: Disconnected", self.controller.serial)
+                # set to "disconnected" pattern
+                await self.controller.set_player_led(0)
+                await self.on_state_changed(
+                    self.controller.serial,
+                    {"state": PairingState.DISCONNECTED.value}
+                )
 
     async def attempt_reconnect(self):
         retry_delay = self.reconnection_start_retry_delay
-        while self.should_reconnect and not self.is_connected and not self.controller.is_connected():
+        while self.should_reconnect and not self.is_connected:
             try:
                 # Reconnect controller if it is not connected
+                is_controller_reconnected = True
                 if not self.controller.is_connected():
-                    is_controller_reconnected = self.controller.reconnect()
-                    # We need controller to be connected to pair with the game
-                    if not is_controller_reconnected:
-                        continue
+                    is_controller_reconnected = await self.controller.reconnect()
                 # Pair with the game
-                if not self.is_connected:
-                    asyncio.create_task(self.pair())
+                if is_controller_reconnected and not self.is_connected and (
+                    not self.pair_task or self.pair_task.done()
+                ):
+                    await self.start_pair()
             except Exception:
                 logger.exception("%s: Reconnection attempt failed", self.controller.serial)
 
@@ -400,6 +500,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     async def send_command(self):
         while True:
             if not self.is_connected:
+                if not self._websocket_is_open(self.ws):
+                    return
                 await asyncio.sleep(FRAME_DURATION)
                 continue
             try:

@@ -58,7 +58,6 @@ class Controller extends Component {
             ...props.controller,
         }
 
-        window.mitty.on('resp_' + WsCommand.DISCONNECT_CONTROLLER, this.onDisconnected)
         window.mitty.on('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
     }
 
@@ -91,13 +90,9 @@ class Controller extends Component {
         }
     }
 
-    render(props, { name, state, pairing_code, is_left, color, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message }) {
+    render(props, { name, state, connection_requested, pairing_code, is_left, color, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message }) {
         const controllerState = state
         const stateMessage = PairingStateMessage[controllerState]
-        let showButton = true
-        if ([PairingState.GETTING_TOKEN, PairingState.PAIRING, PairingState.CONNECTING].indexOf(controllerState) > -1) {
-            showButton = false
-        }
 
         let controllerSvg
         if (is_left) {
@@ -133,7 +128,7 @@ class Controller extends Component {
                         `}
                     </div>
                     <div class="pure-u-6-24">
-                        ${showButton && controllerState == PairingState.CONNECTED && html`
+                        ${controllerState == PairingState.CONNECTED && html`
                             <div class="button-group">
                                 <button type="button" onClick=${this.disconnect} class="pure-button pure-button-error">Disconnect</button>
                                 <button type="button" onClick=${this.toggleRumble} class="pure-button ${rumble_enabled ? 'pure-button-primary' : 'pure-button-secondary'}">
@@ -141,7 +136,10 @@ class Controller extends Component {
                                 </button>
                             </div>
                         `}
-                        ${showButton && controllerState != PairingState.CONNECTED && html`
+                        ${connection_requested && controllerState != PairingState.CONNECTED && html`
+                            <button type="button" onClick=${this.disconnect} class="pure-button pure-button-error">Stop</button>
+                        `}
+                        ${!connection_requested && controllerState != PairingState.CONNECTED && html`
                             <button type="button" onClick=${this.connect} class="pure-button pure-button-primary">Connect</button>
                         `}
                     </div>

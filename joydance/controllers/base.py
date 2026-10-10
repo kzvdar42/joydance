@@ -1,5 +1,5 @@
+import asyncio
 import logging
-
 import hid
 
 from joydance.controllers import AbstractControllerWrapper, JoyConWrapper
@@ -12,6 +12,16 @@ CONTROLLER_CLASSES = { JoyConWrapper, }
 VENDOR_IDS = set()
 PRODUCT_IDS = set()
 PRODUCT_ID_TO_CONTROLLER_CLASS = {}
+_CONTROLLER_CONNECTION_LOCKS: dict[object, asyncio.Lock] = {}
+
+
+def _get_controller_connection_lock(serial) -> asyncio.Lock:
+    """Return the shared connection lock for a controller serial."""
+    lock = _CONTROLLER_CONNECTION_LOCKS.get(serial)
+    if lock is None:
+        lock = asyncio.Lock()
+        _CONTROLLER_CONNECTION_LOCKS[serial] = lock
+    return lock
 
 
 # Fill static variables
@@ -63,15 +73,23 @@ async def update_controllers_list(
 
     for dev in devices:
         try:
-            if dev["serial"] in controllers:
+            serial = dev["serial"]
+            if serial in controllers:
                 continue
 
-            controller_class = PRODUCT_ID_TO_CONTROLLER_CLASS[dev["product_id"]]
-            controller = controller_class(dev["vendor_id"], dev["product_id"], dev["serial"])
-            # set to "disconnected" pattern
-            await controller.set_player_led(-1)
-            controllers[dev["serial"]] = controller
+            async with _get_controller_connection_lock(serial):
+                # Another discovery request may have connected this controller
+                # while this request was waiting for the per-serial lock.
+                if serial in controllers:
+                    continue
+
+                controller_class = PRODUCT_ID_TO_CONTROLLER_CLASS[dev["product_id"]]
+                controller = controller_class(dev["vendor_id"], dev["product_id"], serial)
+                await controller.connect()
+                # set to "disconnected" pattern
+                await controller.set_player_led(-1)
+                controllers[serial] = controller
         except Exception as e:
-            logger.error(f"Error updating controller list: {e}", exc_info=True)
+            logger.error("Error updating controller list: %s", e, exc_info=True)
             continue
     return controllers
