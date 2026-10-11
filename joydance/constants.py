@@ -98,6 +98,7 @@ class Command(Enum):
 
     SHORTCUT_SEARCH = "SHORTCUT_SEARCH"
     SHORTCUT_EXTRA = "SHORTCUT_EXTRA"
+    UPLOAD = "SHORTCUT_UPLOAD"
 
 
 class JoyConButton(Enum):
@@ -130,7 +131,9 @@ class JoyConButton(Enum):
 
 
 # Assign buttons on Joy-Con (R) with commands
-SHORTCUT_MAPPING = {
+BUTTON_MAPPING = {
+    JoyConButton.A: [Command.ACCEPT],
+    JoyConButton.B: [Command.BACK],
     JoyConButton.X: [
         Command.DELETE_DANCERCARD,
         Command.DELETE_PLAYLIST,
@@ -140,11 +143,13 @@ SHORTCUT_MAPPING = {
         Command.SORTING,
         Command.SWAP_GENDER,
         Command.TOGGLE_COOP,
-        Command.SHORTCUT_EXTRA,
         Command.V1_FAVORITE,
         Command.ACTIVATE_DANCER_PROFILE,
     ],
     JoyConButton.Y: [
+        Command.SHORTCUT_EXTRA,
+        # shortcut: no verified Switch binding for My Uploads; use Y until confirmed.
+        Command.UPLOAD,
         Command.ACTIVATE_DANCERCARD,
         Command.CHANGE_DANCERCARD,
         Command.SWEAT_ACTIVATION,
@@ -154,9 +159,9 @@ SHORTCUT_MAPPING = {
     JoyConButton.PLUS: [
         Command.DONT_SHOW_ANYMORE,
         Command.FAVORITE,
-        Command.PAUSE,
         Command.PLAYLIST_RENAME,
         Command.SAVE_PLAYLIST,
+        Command.PAUSE,
     ],
     JoyConButton.R: [
         Command.PLAYLIST_MOVE_SONG_LEFT,
@@ -169,11 +174,13 @@ SHORTCUT_MAPPING = {
 }
 
 # Same with Joy-Con (L)
-SHORTCUT_MAPPING[JoyConButton.UP] = SHORTCUT_MAPPING[JoyConButton.X]
-SHORTCUT_MAPPING[JoyConButton.LEFT] = SHORTCUT_MAPPING[JoyConButton.Y]
-SHORTCUT_MAPPING[JoyConButton.MINUS] = SHORTCUT_MAPPING[JoyConButton.PLUS]
-SHORTCUT_MAPPING[JoyConButton.L] = SHORTCUT_MAPPING[JoyConButton.R]
-SHORTCUT_MAPPING[JoyConButton.ZL] = SHORTCUT_MAPPING[JoyConButton.ZR]
+BUTTON_MAPPING[JoyConButton.UP] = BUTTON_MAPPING[JoyConButton.X]
+BUTTON_MAPPING[JoyConButton.RIGHT] = BUTTON_MAPPING[JoyConButton.A]
+BUTTON_MAPPING[JoyConButton.DOWN] = BUTTON_MAPPING[JoyConButton.B]
+BUTTON_MAPPING[JoyConButton.LEFT] = BUTTON_MAPPING[JoyConButton.Y]
+BUTTON_MAPPING[JoyConButton.MINUS] = BUTTON_MAPPING[JoyConButton.PLUS]
+BUTTON_MAPPING[JoyConButton.L] = BUTTON_MAPPING[JoyConButton.R]
+BUTTON_MAPPING[JoyConButton.ZL] = BUTTON_MAPPING[JoyConButton.ZR]
 
 
 # Base controller state before connection

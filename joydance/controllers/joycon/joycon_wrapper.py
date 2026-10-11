@@ -3,7 +3,7 @@ import logging
 
 from .pycon import ButtonEventJoyCon
 from .pycon.constants import JOYCON_VENDOR_ID, JOYCON_PRODUCT_IDS
-from joydance.constants import JoyConButton, Command, SHORTCUT_MAPPING
+from joydance.constants import JoyConButton, Command, BUTTON_MAPPING
 from joydance.controllers import AbstractControllerWrapper
 
 
@@ -60,10 +60,15 @@ class JoyConWrapper(AbstractControllerWrapper):
         return self.joycon.events()
 
     def get_latest_command(self, commands_to_check=None):
+        available_commands = self.available_shortcuts | {
+            Command.ACCEPT, Command.BACK, Command.PAUSE,
+        }
+        if commands_to_check is not None:
+            available_commands &= commands_to_check
+
         # Get pressed button
         for event_type, status in self.get_raw_button_events():
-            # Maybe change?
-            if status == 0:  # 0 = pressed, 1 = released
+            if status == 0:  # 0 = released, 1 = pressed
                 continue
 
             try:
@@ -72,24 +77,9 @@ class JoyConWrapper(AbstractControllerWrapper):
                 logger.warning("Unknown button event_type: %s in get_latest_command", event_type)
                 continue
 
-            cmds = []
-            if joycon_button == JoyConButton.PLUS or joycon_button == JoyConButton.MINUS:
-                cmds.append(Command.PAUSE)
-            elif joycon_button == JoyConButton.A or joycon_button == JoyConButton.RIGHT:
-                cmds.append(Command.ACCEPT)
-            elif joycon_button == JoyConButton.B or joycon_button == JoyConButton.DOWN:
-                cmds.append(Command.BACK)
-            elif joycon_button in SHORTCUT_MAPPING:
-                for shortcut in SHORTCUT_MAPPING[joycon_button]:
-                    if shortcut in self.available_shortcuts:
-                        cmds.append(shortcut)
-            if cmds:
-                if commands_to_check:
-                    for cmd in cmds:
-                        if cmd in commands_to_check:
-                            return cmd
-                else:
-                    return cmds[0]
+            for cmd in BUTTON_MAPPING.get(joycon_button, ()):
+                if cmd in available_commands:
+                    return cmd
         return None
 
     def get_accel_events(self):
