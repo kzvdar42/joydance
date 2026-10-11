@@ -129,20 +129,21 @@ class JustDanceGameV1(JustDanceGameAbstract):
         return item_actions
 
     async def parse_phone_setup_data(self, data):
+        setup_data = data.get("setupData", {})
         self.is_on_recap = False
         self.is_in_lobby = False
 
         if data.get("isPopup"):
             self._pre_pop_up_carousel_type = self.current_carousel_type
             self.current_carousel_type = "popup"
-        elif data.get("setupData", {}).get("lobbySetup"):
+        elif setup_data.get("lobbySetup"):
             self.current_carousel_type = "lobby"
-        elif data.get("setupData", {}).get("recapSetup"):
+        elif setup_data.get("recapSetup"):
             self.current_carousel_type = "recap"
         else:
             self.current_carousel_type = "main"
 
-        main_carousel_rows = data.get("setupData", {}).get("mainCarousel", {}).get("rows", [])
+        main_carousel_rows = setup_data.get("mainCarousel", {}).get("rows", [])
         if main_carousel_rows:
             num_columns_per_row_id = {}
             all_item_actions = defaultdict(dict)
@@ -160,7 +161,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             self.action_id = carousel_pos_setup["actionIndex"]
             self.coach_id = 0
 
-        lobby_setup = data.get("setupData", {}).get("lobbySetup", {})
+        lobby_setup = setup_data.get("lobbySetup", {})
         if lobby_setup:
             self.is_in_lobby = True
             self.num_columns_per_row_id = {0: 1}
@@ -169,26 +170,32 @@ class JustDanceGameV1(JustDanceGameAbstract):
             }
             self.num_coaches = len(lobby_setup.get("coaches", []))
 
-        if data.get("setupData", {}).get("recapSetup", {}):
+        if setup_data.get("recapSetup", {}):
             self.is_on_recap = True
 
-        shortcuts_data = data.get("setupData", {}).get("shortcuts", [])
+        shortcuts_data = setup_data.get("shortcuts") or []
         logger.debug("V1 shortcuts_data: %s", shortcuts_data)
-        if shortcuts_data:
-            shortcuts_identifiers = set()
-            for shortcut in shortcuts_data:
-                try:
-                    command_root = json.loads(shortcut["command"])["root"]
-                    if "identifier" in command_root:
-                        shortcuts_identifiers.add(Command(command_root["identifier"]))
-                    elif "input" in command_root:
-                        shortcuts_identifiers.add(Command(command_root["input"]))
-                except Exception:
-                    logger.exception("V1: Failed to parse shortcut: %s", shortcut)
-            if shortcuts_identifiers:
-                self.available_shortcuts = shortcuts_identifiers
-                if hasattr(self.controller, "available_shortcuts"):
-                    self.controller.available_shortcuts = shortcuts_identifiers
+        shortcuts = set()
+        if setup_data.get("gameplaySetup", {}).get("pauseSlider", {}):
+            shortcuts.add(Command.PAUSE)
+        for shortcut in shortcuts_data:
+            try:
+                command_root = json.loads(shortcut["command"])["root"]
+                if "identifier" in command_root:
+                    shortcuts.add(Command(command_root["identifier"]))
+                elif "input" in command_root:
+                    shortcuts.add(Command(command_root["input"]))
+            except Exception:
+                logger.exception("V1: Failed to parse shortcut: %s", shortcut)
+        if any(
+            len(item.get("actions", [])) > 1
+            for row in main_carousel_rows
+            for item in row.get("items", [])
+        ):
+            shortcuts.add(Command.NEXT_ACTION)
+        self.available_shortcuts = shortcuts
+        if hasattr(self.controller, "available_shortcuts"):
+            self.controller.available_shortcuts = shortcuts.copy()
 
     async def connect_ws(self):
         if not self.pairing_url.startswith("ws://"):
@@ -330,6 +337,16 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 self.coach_id += 1
                 data["coachId"] = self.coach_id
             return __class, data
+        elif cmd == Command.NEXT_ACTION:
+            if not self.is_input_allowed or self.is_in_lobby:
+                return None, None
+            row_idx, col_idx = self.row_num, self.col_num_per_row_id[self.row_num]
+            actions = self.item_actions.get(row_idx, {}).get(col_idx, [])
+            if len(actions) < 2:
+                return None, None
+            self.action_id = (self.action_id + 1) % len(actions)
+            __class = "ChangeAction_PhoneCommandData"
+            data = {"rowIndex": row_idx, "itemIndex": col_idx, "actionIndex": self.action_id}
         elif cmd == Command.BACK:
             if self.is_search_opened:
                 __class = "JD_CancelKeyboard_PhoneCommandData"
@@ -391,6 +408,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
         elif cmd == Command.UP:
             if self.is_in_lobby:
                 return None, None
+            self.action_id = 0
             __class = "ChangeRow_PhoneCommandData"
             self.row_num -= 1
             if self.row_num < 0:
@@ -399,6 +417,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
         elif cmd == Command.DOWN:
             if self.is_in_lobby:
                 return None, None
+            self.action_id = 0
             __class = "ChangeRow_PhoneCommandData"
             self.row_num += 1
             if self.row_num >= len(self.num_columns_per_row_id):
@@ -406,6 +425,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             data["rowIndex"] = self.row_num
         elif cmd == Command.LEFT:
             if not self.is_in_lobby:
+                self.action_id = 0
                 __class = "ChangeItem_PhoneCommandData"
                 data["rowIndex"] = self.row_num
                 self.col_num_per_row_id[self.row_num] -= 1
@@ -423,6 +443,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 data["coachId"] = self.coach_id
         elif cmd == Command.RIGHT:
             if not self.is_in_lobby:
+                self.action_id = 0
                 __class = "ChangeItem_PhoneCommandData"
                 data["rowIndex"] = self.row_num
                 self.col_num_per_row_id[self.row_num] += 1

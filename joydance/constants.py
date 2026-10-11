@@ -69,6 +69,7 @@ class Command(Enum):
     V1_FAVORITE = 2424896653
 
     PAUSE = "PAUSE"
+    NEXT_ACTION = "NEXT_ACTION"
 
     BACK = "SHORTCUT_BACK"
     CHANGE_DANCERCARD = "SHORTCUT_CHANGE_DANCERCARD"
@@ -170,6 +171,7 @@ BUTTON_MAPPING = {
     JoyConButton.ZR: [
         Command.PLAYLIST_MOVE_SONG_RIGHT,
         Command.TIPS_NEXT,
+        Command.NEXT_ACTION,
     ],
 }
 
