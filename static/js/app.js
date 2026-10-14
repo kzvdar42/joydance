@@ -50,7 +50,7 @@ class App extends Component {
     sendRequest(cmd, data = {}) {
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
             console.error('WebSocket is not connected');
-            return;
+            return false;
         }
         
         const msg = {
@@ -59,10 +59,13 @@ class App extends Component {
         };
         console.log('Sending WebSocket message:', msg);
         this.socket.send(JSON.stringify(msg));
+        return true;
     }
 
     requestGetControllerList() {
-        this.sendRequest(WsCommand.GET_CONTROLLER_LIST);
+        if (!this.sendRequest(WsCommand.GET_CONTROLLER_LIST)) {
+            window.mitty.emit('ws_disconnected');
+        }
     }
 
     handleSearchInput(data) {

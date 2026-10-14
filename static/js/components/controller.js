@@ -1,6 +1,7 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
 import { WsCommand } from '/js/consts.js';
+import ControllerIcon from '/js/components/ControllerIcon.js';
 
 const SVG_BATTERY_LEVEL = html`<svg style="enable-background:new 0 0 16 16" viewBox="0 0 16 16" xml:space="preserve" xmlns="http://www.w3.org/2000/svg"><path d="M15 4H0v8h15V9h1V7h-1V4zm-1 3v4H1V5h13v2z"/><rect class="battery-bar-4" height="4" width="2" x="11" y="6"/><rect class="battery-bar-3" height="4" width="2" x="8" y="6"/><rect class="battery-bar-2" height="4" width="2" x="5" y="6"/><rect class="battery-bar-1" height="4" width="2" x="2" y="6"/></svg>`
 
@@ -57,8 +58,14 @@ class Controller extends Component {
         this.state = {
             ...props.controller,
         }
+    }
 
+    componentDidMount() {
         window.mitty.on('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
+    }
+
+    componentWillUnmount() {
+        window.mitty.off('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
     }
 
     connect() {
@@ -90,16 +97,9 @@ class Controller extends Component {
         }
     }
 
-    render(props, { name, state, connection_requested, pairing_code, is_left, color, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message }) {
+    render(props, { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message }) {
         const controllerState = state
         const stateMessage = PairingStateMessage[controllerState]
-
-        let controllerSvg
-        if (is_left) {
-            controllerSvg = html`<svg class="controller-color" viewBox="0 0 171 453" xmlns="http://www.w3.org/2000/svg" xml:space="preserve" style="fill-rule:evenodd;clip-rule:evenodd"><path d="M219.594 33.518v412.688c0 1.023-.506 1.797-1.797 1.797h-49.64c-51.68 0-85.075-45.698-85.075-85.075V114.987c0-57.885 56.764-84.719 84.719-84.719h48.79c2.486 0 3.003 1.368 3.003 3.25zm-32.123 105.087c0 17.589-14.474 32.062-32.063 32.062-17.589 0-32.062-14.473-32.062-32.062s14.473-32.063 32.062-32.063 32.063 14.474 32.063 32.063z" style="fill:${color};stroke:#000;stroke-width:8.33px" transform="translate(-65.902 -13.089)"/></svg>`
-        } else {
-            controllerSvg = html`<svg class="controller-color" viewBox="0 0 171 453" xmlns="http://www.w3.org/2000/svg" xml:space="preserve" style="fill-rule:evenodd;clip-rule:evenodd"><path d="M324.763 40.363v412.688c0 1.023.506 1.797 1.797 1.797h49.64c51.68 0 85.075-45.698 85.075-85.075V121.832c0-6.774-.777-13.123-2.195-19.054-10.696-44.744-57.841-65.665-82.524-65.665h-48.79c-2.486 0-3.003 1.368-3.003 3.25zm96 218.094c0 17.589-14.473 32.063-32.062 32.063s-32.063-14.474-32.063-32.063c0-17.589 14.474-32.062 32.063-32.062 17.589 0 32.062 14.473 32.062 32.062z" style="fill:${color};fill-rule:nonzero;stroke:#000;stroke-width:8.33px" transform="translate(-307.583 -19.934)"/></svg>`
-        }
 
         const batteryLevel = BATTERY_LEVEL[battery_level]
 
@@ -107,7 +107,7 @@ class Controller extends Component {
             <li>
                 <div class="pure-g">
 
-                    <div class="pure-u-2-24 flex">${controllerSvg}</div>
+                    <div class="pure-u-2-24 flex"><${ControllerIcon} ...${this.state} /></div>
                     <div class="pure-u-12-24 controller-info">
                         <div class="flex">
                             <span class="controller-name">${name}</span>
@@ -157,28 +157,39 @@ export class Controllers extends Component {
         }
 
         this.refreshControllerList = this.refreshControllerList.bind(this)
+        this.finishRefresh = this.finishRefresh.bind(this)
     }
 
     refreshControllerList() {
         this.setState({
-            isRefreshing: false,
+            isRefreshing: true,
         })
         window.mitty.emit('req_' + WsCommand.GET_CONTROLLER_LIST)
     }
 
+    finishRefresh() {
+        this.setState({ isRefreshing: false })
+    }
+
     componentDidMount() {
+        window.mitty.on('ws_disconnected', this.finishRefresh)
+    }
+
+    componentDidUpdate(prevProps) {
+        if (this.state.isRefreshing && prevProps.controllers !== this.props.controllers) {
+            this.finishRefresh()
+        }
+    }
+
+    componentWillUnmount() {
+        window.mitty.off('ws_disconnected', this.finishRefresh)
     }
 
     render(props, state) {
         return html`
             <div class="pure-g">
                 <h2 class="pure-u-18-24">Controllers</h2>
-                    ${state.isRefreshing && html`
-                        <button type="button" disabled class="pure-button btn-refresh pure-u-6-24">Refresh</a>
-                    `}
-                    ${!state.isRefreshing && html`
-                        <button type="button" class="pure-button btn-refresh pure-u-6-24" onClick=${this.refreshControllerList}>Refresh</button>
-                    `}
+                <button type="button" disabled=${state.isRefreshing} aria-busy=${state.isRefreshing} class="pure-button btn-refresh pure-u-6-24" onClick=${this.refreshControllerList}>Refresh</button>
             </div>
             <div class="controllers-wrapper">
                 ${props.controllers.length == 0 && html`

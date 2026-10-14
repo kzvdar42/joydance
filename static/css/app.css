@@ -83,8 +83,13 @@ body {
 
 
 .controllers .controllers-wrapper .controllers-list .controller-color {
-    width: 35%;
+    width: 18px;
     margin: auto;
+}
+
+.controllers .controllers-wrapper .controllers-list .controller-pro {
+    width: 48px;
+    flex-shrink: 0;
 }
 
 .controllers .controllers-wrapper .controllers-list .controller-name {
@@ -323,7 +328,7 @@ select option {
     width: 90px;
 }
 
-.controllers .pure-g {
+.controllers > .pure-g {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -363,7 +368,8 @@ select option {
 }
 
 .controllers-list .pure-u-2-24 {
-    flex: 0 0 40px; /* Fixed width for controller icon */
+    flex: 0 0 56px; /* Fixed width for controller icon */
+    margin-right: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
