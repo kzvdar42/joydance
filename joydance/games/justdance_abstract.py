@@ -494,6 +494,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 self.is_input_allowed = False
             else:
                 self.is_input_allowed = message.get("inputSetup", {}).get("isEnabled", 0) == 1
+            if hasattr(self.controller, "available_shortcuts"):
+                self.controller.available_shortcuts = self.available_shortcuts.copy()
 
         await self.on_game_message(message)
 
