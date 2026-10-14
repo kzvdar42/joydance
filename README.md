@@ -186,3 +186,4 @@ If you'd like to support my efforts, you can do so through ko-fi or PayPal. Howe
 -  [tocoteron/joycon-python](https://github.com/tocoteron/joycon-python)
 -  [Davidobot/BetterJoy](https://github.com/Davidobot/BetterJoy)
 -  [redphx/joydance up to v0.5.2](https://github.com/redphx/joydance)
+- Pro Controller artwork adapted from [Switch Button Icons and Controls](https://zacksly.itch.io/switch-button-icons-and-controls) by [Zacksly](https://zacksly.itch.io), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Cropped and recolored to match device colors; gradients simplified; logo and lettering removed. This artwork retains its CC BY 3.0 license.
