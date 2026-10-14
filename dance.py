@@ -93,40 +93,45 @@ async def connect_controller(app, ws, data) -> None:
             logger.error(f"Configuration validation failed: {error_msg}")
             raise ValueError(f"Configuration validation failed: {error_msg}")
 
-        config = app["config_handler"].data.copy()
-        config["pairing_code"] = pairing_code
-        config["pairing_method"] = pairing_method
-        config["host_ip_addr"] = host_ip_addr
-        config["console_ip_addr"] = console_ip_addr
-        app["config_handler"].data = config
+        async with app["joydance_connection_locks"][serial]:
+            config = app["config_handler"].data.copy()
+            config["pairing_code"] = pairing_code
+            config["pairing_method"] = pairing_method
+            config["host_ip_addr"] = host_ip_addr
+            config["console_ip_addr"] = console_ip_addr
+            app["config_handler"].data = config
 
-        if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
-            app["controllers_info"][serial]["pairing_code"] = pairing_code
-            console_ip_addr = None
-        else:
-            app["controllers_info"][serial]["pairing_code"] = ""
+            if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
+                app["controllers_info"][serial]["pairing_code"] = pairing_code
+                console_ip_addr = None
+            else:
+                app["controllers_info"][serial]["pairing_code"] = ""
 
-        if pairing_method == PairingMethod.OLD.value:
-            game_class = JustDanceGameV1
-        else:
-            game_class = JustDanceGameV2
+            if pairing_method == PairingMethod.OLD.value:
+                game_class = JustDanceGameV1
+            else:
+                game_class = JustDanceGameV2
 
-        logger.debug(f"{serial}: connect_controller - creating {game_class.__name__} instance")
-        game_connection = game_class(
-            controller=controller,
-            pairing_code=pairing_code,
-            host_ip_addr=host_ip_addr,
-            console_ip_addr=console_ip_addr,
-            on_state_changed=on_joydance_state_changed,
-            on_game_message=on_game_message,
-        )
+            logger.debug(f"{serial}: connect_controller - creating {game_class.__name__} instance")
+            game_connection = game_class(
+                controller=controller,
+                pairing_code=pairing_code,
+                host_ip_addr=host_ip_addr,
+                console_ip_addr=console_ip_addr,
+                on_state_changed=on_joydance_state_changed,
+                on_game_message=on_game_message,
+            )
 
-        app["joydance_connections"][serial] = game_connection
+            previous_connection = app["joydance_connections"].get(serial)
+            if previous_connection is not None:
+                await previous_connection.disconnect(should_reconnect=False)
 
-        logger.debug(f"{serial}: connect_controller - starting pair() task")
-        task = await game_connection.start_pair()
-        task.add_done_callback(handle_task_exception)
-        logger.debug(f"{serial}: connect_controller - completed successfully")
+            app["joydance_connections"][serial] = game_connection
+
+            logger.debug(f"{serial}: connect_controller - starting pair() task")
+            task = await game_connection.start_pair()
+            task.add_done_callback(handle_task_exception)
+            logger.debug(f"{serial}: connect_controller - completed successfully")
     except Exception as e:
         logger.error(f"Error in connect_controller: {e}", exc_info=True)
         raise
@@ -136,12 +141,13 @@ async def disconnect_controller(app, ws, data):
     try:
         logger.debug("disconnect_controller: %s", data)
         serial = data["controller_serial"]
-        if serial not in app["joydance_connections"]:
-            logger.warning(f"Attempted to disconnect unknown controller: {serial}")
-            return
-        joydance = app["joydance_connections"][serial]
-        await joydance.disconnect(should_reconnect=False)
-        logger.debug(f"{serial}: disconnect_controller - completed successfully")
+        async with app["joydance_connection_locks"][serial]:
+            if serial not in app["joydance_connections"]:
+                logger.warning(f"Attempted to disconnect unknown controller: {serial}")
+                return
+            joydance = app["joydance_connections"][serial]
+            await joydance.disconnect(should_reconnect=False)
+            logger.debug(f"{serial}: disconnect_controller - completed successfully")
     except Exception as e:
         logger.error(f"Error in disconnect_controller: {e}", exc_info=True)
         raise
@@ -374,6 +380,7 @@ if __name__ == "__main__":
 
         # Define app variables and load&save config
         app["joydance_connections"] = {}
+        app["joydance_connection_locks"] = defaultdict(asyncio.Lock)
         app["controllers"] = {}
         app["controllers_info"] = defaultdict(dict)
         app["config_handler"] = ConfigHandler(CONFIG_PATHS)
