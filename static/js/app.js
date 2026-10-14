@@ -25,6 +25,8 @@ class App extends Component {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 100;
         this.reconnectDelay = 2000;
+        this.reconnectTimer = null;
+        this.socket = null;
 
         this.connectWs = this.connectWs.bind(this)
         this.sendRequest = this.sendRequest.bind(this)
@@ -111,18 +113,26 @@ class App extends Component {
     }
 
     connectWs() {
+        if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
+            return;
+        }
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
         window.mitty.emit('ws_reconnecting');
         const that = this
-        this.socket = new WebSocket('ws://' + window.location.host + '/ws')
+        const socket = new WebSocket('ws://' + window.location.host + '/ws')
+        this.socket = socket
 
-        this.socket.onopen = (event) => {
+        socket.onopen = (event) => {
+            if (this.socket !== socket) return;
             console.log('[open] Connection established')
             that.requestGetControllerList()
             window.mitty.emit('ws_connected');
             this.reconnectAttempts = 0;
         }
 
-        this.socket.onmessage = (event) => {
+        socket.onmessage = (event) => {
+            if (this.socket !== socket) return;
             const msg = JSON.parse(event.data)
             console.log('Received WebSocket message:', msg)
             const cmd = msg['cmd']
@@ -147,7 +157,9 @@ class App extends Component {
             }
         }
 
-        this.socket.onclose = (event) => {
+        socket.onclose = (event) => {
+            if (this.socket !== socket) return;
+            this.socket = null;
             if (event.wasClean) {
                 console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
             } else {
@@ -157,20 +169,22 @@ class App extends Component {
             this.scheduleReconnect();
         }
 
-        this.socket.onerror = (error) => {
+        socket.onerror = (error) => {
+            if (this.socket !== socket) return;
             console.log(`[error] ${error.message}`);
             window.mitty.emit('ws_disconnected');
-            this.scheduleReconnect();
         }
     }
 
     scheduleReconnect() {
+        if (this.reconnectTimer !== null) return;
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             let delay = this.reconnectDelay;
             // let delay = this.reconnectDelay * (2 ** this.reconnectAttempts); // Exponential backoff
             console.log(`Reconnecting in ${delay / 1000} seconds...`);
 
-            setTimeout(() => {
+            this.reconnectTimer = setTimeout(() => {
+                this.reconnectTimer = null;
                 this.reconnectAttempts++;
                 this.connectWs();
             }, delay);
@@ -200,6 +214,14 @@ class App extends Component {
 
     componentDidMount() {
         this.connectWs()
+    }
+
+    componentWillUnmount() {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        const socket = this.socket;
+        this.socket = null;
+        if (socket) socket.close();
     }
 
     render(props, state) {

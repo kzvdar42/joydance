@@ -63,7 +63,7 @@ async def connect_controller(app, ws, data) -> None:
     async def on_joydance_state_changed(serial, update_dict):
         try:
             app["controllers_info"][serial].update(update_dict)
-            await ws_send_response(ws, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
+            await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
         except Exception as e:
             logger.error("Error in on_joydance_state_changed: %s", e, exc_info=True)
 
@@ -71,9 +71,9 @@ async def connect_controller(app, ws, data) -> None:
         try:
             __class = message.get("__class")
             if __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
-                await ws_send_response(ws, WsCommand.SHOW_SEARCH, {"serial": serial})
+                await ws_broadcast_response(app, WsCommand.SHOW_SEARCH, {"serial": serial})
             elif __class == "JD_CancelKeyboard_ConsoleCommandData":
-                await ws_send_response(ws, WsCommand.HIDE_SEARCH, {"serial": serial})
+                await ws_broadcast_response(app, WsCommand.HIDE_SEARCH, {"serial": serial})
         except Exception as e:
             logger.error("Error in on_game_message: %s", e, exc_info=True)
 
@@ -232,6 +232,16 @@ async def ws_send_response(ws, cmd, data):
         logger.warning(f"Attempted to send to a closed websocket. CMD: {cmd.value}")
 
 
+async def ws_broadcast_response(app, cmd, data):
+    for ws in tuple(app["websockets"]):
+        if ws.closed:
+            continue
+        try:
+            await ws_send_response(ws, cmd, data)
+        except Exception:
+            logger.exception("Error sending browser update: %s", cmd.value)
+
+
 async def toggle_rumble(app, ws, data):
     try:
         serial = data["controller_serial"]
@@ -248,7 +258,7 @@ async def toggle_rumble(app, ws, data):
         if serial in app["controllers_info"]:
             app["controllers_info"][serial]["rumble_enabled"] = enabled
             # Send update to client
-            await ws_send_response(ws, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
+            await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
         logger.debug(f"{serial}: toggle_rumble - completed successfully")
     except Exception as e:
         logger.error(f"Error in toggle_rumble: {e}", exc_info=True)
@@ -259,6 +269,7 @@ async def websocket_handler(request):
     ws = web.WebSocketResponse()
     try:
         await ws.prepare(request)
+        request.app["websockets"].add(ws)
         async for msg in ws:
             logger.debug("got ws msg %s", msg)
             if msg.type == WSMsgType.TEXT:
@@ -313,6 +324,7 @@ async def websocket_handler(request):
     except Exception as e:
         logger.error("Fatal error in websocket_handler: %s", e, exc_info=True)
     finally:
+        request.app["websockets"].discard(ws)
         logger.debug("Websocket handler exiting")
 
     return ws
@@ -380,6 +392,7 @@ if __name__ == "__main__":
 
         # Define app variables and load&save config
         app["joydance_connections"] = {}
+        app["websockets"] = set()
         app["joydance_connection_locks"] = defaultdict(asyncio.Lock)
         app["controllers"] = {}
         app["controllers_info"] = defaultdict(dict)

@@ -21,6 +21,7 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
             "controllers": {"test": self.controller},
             "controllers_info": defaultdict(dict),
             "joydance_connections": {},
+            "websockets": set(),
             "joydance_connection_locks": defaultdict(asyncio.Lock),
             "config_handler": SimpleNamespace(
                 data={}, validate_config_with_error=ConfigHandler.validate_config_with_error,
