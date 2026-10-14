@@ -24,9 +24,9 @@ class ButtonEventJoyCon(PythonicJoyCon):
         self._previous_right_sr = self._previous_left_sr  = 0
         self._previous_right_sl = self._previous_left_sl  = 0
 
-        if self.is_left():
+        if self.is_left() or self.is_pro():
             self.register_update_hook(self._event_tracking_update_hook_left)
-        else:
+        if not self.is_left():
             self.register_update_hook(self._event_tracking_update_hook_right)
 
     def joycon_button_event(self, button, state):  # overridable

@@ -9,7 +9,7 @@ import logging
 import hid
 
 from .constants import (JOYCON_L_PRODUCT_ID, JOYCON_PRODUCT_IDS,
-                        JOYCON_R_PRODUCT_ID, JOYCON_VENDOR_ID)
+                        JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID, JOYCON_VENDOR_ID)
 from joydance.controllers.hid_executor import HID_EXECUTOR
 from joydance.utils.errors import ControllerConnectionError
 
@@ -32,7 +32,7 @@ class JoyCon:
     simple_mode: bool
     color_body: Tuple[int, int, int]
     color_btn: Tuple[int, int, int]
-    stick_cal: Tuple[int, int, int, int, int, int, int, int]
+    stick_cal: dict[str, list[int]]
 
     def __init__(self, vendor_id: int, product_id: int, serial: str = None, simple_mode=False):
         if vendor_id != JOYCON_VENDOR_ID:
@@ -66,7 +66,9 @@ class JoyCon:
         self._packet_number = 0
         self.color_body = (128, 128, 128)
         self.color_btn = (255, 255, 255)
-        self.deadzone = 0
+        self.color_grip_left = None
+        self.color_grip_right = None
+        self.deadzone = {"left": 0, "right": 0}
         self._set_default_stick_calibration()
         self.set_accel_calibration((0, 0, 0), (1, 1, 1))
 
@@ -743,26 +745,37 @@ class JoyCon:
 
     def _read_joycon_data(self):
         try:
-            color_data = self._spi_flash_read(0x6050, 6)
+            color_data = self._spi_flash_read(0x6050, 12 if self.is_pro() else 6)
+            if len(color_data) < 6:
+                raise ValueError("Incomplete controller color data")
             self.color_body = tuple(color_data[:3])
-            self.color_btn = tuple(color_data[3:])
+            self.color_btn = tuple(color_data[3:6])
+            if self.is_pro():
+                left = tuple(color_data[6:9])
+                right = tuple(color_data[9:12])
+                self.color_grip_left = left if len(left) == 3 and left != (255, 255, 255) else None
+                self.color_grip_right = right if len(right) == 3 and right != (255, 255, 255) else None
         except Exception:
             logger.warning("%s: Error reading JoyCon colors; using defaults", self.serial)
             logger.debug("%s: Error reading JoyCon colors", self.serial, exc_info=True)
 
-        try:
-            self._read_stick_calibration_data()
-        except Exception:
-            logger.warning("%s: Error reading stick calibration data; using defaults", self.serial)
-            logger.debug("%s: Error reading stick calibration data", self.serial, exc_info=True)
-            self._set_default_stick_calibration()
+        self._set_default_stick_calibration()
+        stick_sides = ("left", "right") if self.is_pro() else (
+            "left" if self.is_left() else "right",
+        )
+        for side in stick_sides:
+            try:
+                self.stick_cal[side] = self._read_stick_calibration_data(side)
+            except Exception:
+                logger.warning("%s: Error reading %s stick calibration; using defaults", self.serial, side)
+                logger.debug("%s: Error reading stick calibration data", self.serial, exc_info=True)
 
-        try:
-            buf = self._spi_flash_read(0x6086 if self.is_left() else 0x6098, 16)
-            self.deadzone = (buf[4] << 8) & 0xF00 | buf[3]
-        except Exception:
-            logger.warning("%s: Error reading stick device parameters; using defaults", self.serial)
-            logger.debug("%s: Error reading stick device parameters", self.serial, exc_info=True)
+            try:
+                buf = self._spi_flash_read(0x6086 if side == "left" else 0x6098, 16)
+                self.deadzone[side] = (buf[4] << 8) & 0xF00 | buf[3]
+            except Exception:
+                logger.warning("%s: Error reading stick device parameters; using defaults", self.serial)
+                logger.debug("%s: Error reading stick device parameters", self.serial, exc_info=True)
 
         try:
             # user IMU data
@@ -785,55 +798,63 @@ class JoyCon:
             logger.warning("%s: Error reading IMU calibration data; using defaults", self.serial)
             logger.debug("%s: Error reading IMU calibration data", self.serial, exc_info=True)
 
-    def _read_stick_calibration_data(self):
-        user_stick_cal_addr = 0x8012 if self.is_left() else 0x801D
+    def _read_stick_calibration_data(self, side):
+        is_left = side == "left"
+        user_stick_cal_addr = 0x8012 if is_left else 0x801D
         use_user_data = False
         buf = None
         try:
-            buf = self._spi_flash_read(user_stick_cal_addr, 9)
-
-            for b in buf:
-                if b != 0xFF:
-                    use_user_data = True
-                    break
+            if self._spi_flash_read(user_stick_cal_addr - 2, 2) == b"\xB2\xA1":
+                buf = self._spi_flash_read(user_stick_cal_addr, 9)
+                use_user_data = True
         except Exception:
             logger.warning("%s: Error reading user stick calibration data", self.serial)
             logger.debug("%s: Error reading user stick calibration data", self.serial, exc_info=True)
 
         try:
             if not use_user_data:
-                factory_stick_cal_addr = 0x603D if self.is_left() else 0x6046
+                factory_stick_cal_addr = 0x603D if is_left else 0x6046
                 buf = self._spi_flash_read(factory_stick_cal_addr, 9)
         except Exception:
             logger.warning("%s: Error reading factory stick calibration data", self.serial)
             logger.debug("%s: Error reading factory stick calibration data", self.serial, exc_info=True)
 
         if buf is None:
-            self._set_default_stick_calibration()
-            return
+            return self.stick_cal[side]
 
-        self.stick_cal = [0] * 6
+        if len(buf) != 9 or buf == b"\xFF" * 9:
+            raise ValueError("Invalid stick calibration data")
+        stick_cal = [0] * 6
 
         # X Axis Max above center
-        self.stick_cal[0 if self.is_left() else 2] = (buf[1] << 8) & 0xF00 | buf[0]
+        stick_cal[0 if is_left else 2] = (buf[1] << 8) & 0xF00 | buf[0]
         # Y Axis Max above center
-        self.stick_cal[1 if self.is_left() else 3] = (buf[2] << 4) | (buf[1] >> 4)
+        stick_cal[1 if is_left else 3] = (buf[2] << 4) | (buf[1] >> 4)
         # X Axis Center
-        self.stick_cal[2 if self.is_left() else 4] = (buf[4] << 8) & 0xF00 | buf[3]
+        stick_cal[2 if is_left else 4] = (buf[4] << 8) & 0xF00 | buf[3]
         # Y Axis Center
-        self.stick_cal[3 if self.is_left() else 5] = (buf[5] << 4) | (buf[4] >> 4)
+        stick_cal[3 if is_left else 5] = (buf[5] << 4) | (buf[4] >> 4)
         # X Axis Min below center
-        self.stick_cal[4 if self.is_left() else 0] = (buf[7] << 8) & 0xF00 | buf[6]
+        stick_cal[4 if is_left else 0] = (buf[7] << 8) & 0xF00 | buf[6]
         # Y Axis Min below center
-        self.stick_cal[5 if self.is_left() else 1] = (buf[8] << 4) | (buf[7] >> 4)
+        stick_cal[5 if is_left else 1] = (buf[8] << 4) | (buf[7] >> 4)
+        if any(value <= 0 for value in stick_cal):
+            raise ValueError("Invalid stick calibration range")
+        return stick_cal
 
     def _set_default_stick_calibration(self):
         # Some third-party or half-awake JoyCons do not return calibration data.
         # Use measured fallback values so the controller can still initialize.
-        if self.is_left():
-            self.stick_cal = [1066, 807, 1943, 2377, 956, 1014]
-        else:
-            self.stick_cal = [1029, 1022, 2176, 1618, 936, 821]
+        self.stick_cal = {
+            "left": [1066, 807, 1943, 2377, 956, 1014],
+            "right": [1029, 1022, 2176, 1618, 936, 821],
+        }
+        if self.is_pro():
+            # Match hid-nintendo's fallback center (2000) and range (500–3500).
+            self.stick_cal = {
+                side: [1500, 1500, 2000, 2000, 1500, 1500]
+                for side in ("left", "right")
+            }
 
     def _setup_sensors(self):
         logger.debug("%s: _setup_sensors", self.serial)
@@ -868,14 +889,15 @@ class JoyCon:
             self._ACCEL_COEFF_Y = (1.0 / (cy - self._ACCEL_OFFSET_Y)) * 4.0
             self._ACCEL_COEFF_Z = (1.0 / (cz - self._ACCEL_OFFSET_Z)) * 4.0
 
-    def get_actual_stick_value(self, pre_cal, orientation):  # X/Horizontal = 0, Y/Vertical = 1
-        diff = pre_cal - self.stick_cal[2 + orientation]
-        if (abs(diff) < self.deadzone):
+    def get_actual_stick_value(self, pre_cal, orientation, side):  # X/Horizontal = 0, Y/Vertical = 1
+        stick_cal = self.stick_cal[side]
+        diff = pre_cal - stick_cal[2 + orientation]
+        if (abs(diff) < self.deadzone[side]):
             return 0
         elif diff > 0:  # Axis is above center
-            return diff / self.stick_cal[orientation]
+            return diff / stick_cal[orientation]
         else:
-            return diff / self.stick_cal[4 + orientation]
+            return diff / stick_cal[4 + orientation]
 
     def register_update_hook(self, callback):
         self._input_hooks.append(callback)
@@ -886,6 +908,9 @@ class JoyCon:
 
     def is_right(self):
         return self.product_id == JOYCON_R_PRODUCT_ID
+
+    def is_pro(self):
+        return self.product_id == JOYCON_PRO_PRODUCT_ID
 
     def get_battery_charging(self):
         return self._get_nbit_from_input_report(2, 4, 1)
@@ -963,20 +988,20 @@ class JoyCon:
         return self._get_nbit_from_input_report(5, 7, 1)
 
     def get_stick_left_horizontal(self):
-        if not self.is_left():
+        if not (self.is_left() or self.is_pro()):
             return 0
 
         pre_cal = self._get_nbit_from_input_report(6, 0, 8) \
             | (self._get_nbit_from_input_report(7, 0, 4) << 8)
-        return self.get_actual_stick_value(pre_cal, 0)
+        return self.get_actual_stick_value(pre_cal, 0, "left")
 
     def get_stick_left_vertical(self):
-        if not self.is_left():
+        if not (self.is_left() or self.is_pro()):
             return 0
 
         pre_cal = self._get_nbit_from_input_report(7, 4, 4) \
             | (self._get_nbit_from_input_report(8, 0, 8) << 4)
-        return self.get_actual_stick_value(pre_cal, 1)
+        return self.get_actual_stick_value(pre_cal, 1, "left")
 
     def get_stick_right_horizontal(self):
         if self.is_left():
@@ -984,7 +1009,7 @@ class JoyCon:
 
         pre_cal = self._get_nbit_from_input_report(9, 0, 8) \
             | (self._get_nbit_from_input_report(10, 0, 4) << 8)
-        return self.get_actual_stick_value(pre_cal, 0)
+        return self.get_actual_stick_value(pre_cal, 0, "right")
 
     def get_stick_right_vertical(self):
         if self.is_left():
@@ -992,7 +1017,7 @@ class JoyCon:
 
         pre_cal = self._get_nbit_from_input_report(10, 4, 4) \
             | (self._get_nbit_from_input_report(11, 0, 8) << 4)
-        return self.get_actual_stick_value(pre_cal, 1)
+        return self.get_actual_stick_value(pre_cal, 1, "right")
 
     def get_accels(self):
         input_report = bytes(self._input_report)

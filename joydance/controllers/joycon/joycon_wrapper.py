@@ -2,8 +2,11 @@ import asyncio
 import logging
 
 from .pycon import ButtonEventJoyCon
-from .pycon.constants import JOYCON_VENDOR_ID, JOYCON_PRODUCT_IDS
-from joydance.constants import JoyConButton, Command, BUTTON_MAPPING
+from .pycon.constants import (
+    JOYCON_VENDOR_ID, JOYCON_PRODUCT_IDS,
+    JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID,
+)
+from joydance.constants import JoyConButton, Command, BUTTON_MAPPING, PRO_BUTTON_MAPPING
 from joydance.controllers import AbstractControllerWrapper
 
 
@@ -16,20 +19,34 @@ class JoyConWrapper(AbstractControllerWrapper):
     PRODUCT_IDS = JOYCON_PRODUCT_IDS
 
     def __init__(self, vendor_id, product_id, serial):
-        super().__init__(vendor_id, product_id, serial, name="JoyCon")
+        name = "Pro Controller" if product_id == JOYCON_PRO_PRODUCT_ID else "JoyCon"
+        super().__init__(vendor_id, product_id, serial, name=name)
         self.joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
         self.rumble_enabled = True
         self._is_battery_level_initialized = False
         self._initialize_state()
+        self._state["controller_type"] = {
+            JOYCON_L_PRODUCT_ID: "joycon_left",
+            JOYCON_R_PRODUCT_ID: "joycon_right",
+            JOYCON_PRO_PRODUCT_ID: "pro_controller",
+        }[product_id]
 
     async def get_state(self, pull_new_data=True):
         if pull_new_data or "battery_level" not in self._state:
             self._state["battery_level"] = await self.battery_level()
         if "color" not in self._state and self.joycon.was_state_initialized:
-            self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
+            if not self.is_pro():
+                self.name = f"JoyCon {('L' if self.is_left() else 'R')}"
             self._state["name"] = self.name
             self._state["color"] = "#%02x%02x%02x" % self.color_body
-            self._state["is_left"] = self.is_left()
+            self._state["color_buttons"] = "#%02x%02x%02x" % self.joycon.color_btn
+            if self.is_pro():
+                self._state["color_grip_left"] = "#%02x%02x%02x" % (
+                    self.joycon.color_grip_left or self.color_body
+                )
+                self._state["color_grip_right"] = "#%02x%02x%02x" % (
+                    self.joycon.color_grip_right or self.color_body
+                )
         return self._state.copy()
 
     @property
@@ -63,6 +80,9 @@ class JoyConWrapper(AbstractControllerWrapper):
         available_commands = self.available_shortcuts | {
             Command.ACCEPT, Command.BACK, Command.PAUSE,
         }
+        if self.is_pro():
+            available_commands |= {Command.UP, Command.RIGHT, Command.DOWN, Command.LEFT}
+        button_mapping = PRO_BUTTON_MAPPING if self.is_pro() else BUTTON_MAPPING
         if commands_to_check is not None:
             available_commands &= commands_to_check
 
@@ -77,7 +97,7 @@ class JoyConWrapper(AbstractControllerWrapper):
                 logger.warning("Unknown button event_type: %s in get_latest_command", event_type)
                 continue
 
-            for cmd in BUTTON_MAPPING.get(joycon_button, ()):
+            for cmd in button_mapping.get(joycon_button, ()):
                 if cmd in available_commands:
                     return cmd
         return None
@@ -100,9 +120,12 @@ class JoyConWrapper(AbstractControllerWrapper):
         try:
             controller_status = self.get_joystick_status()
             if controller_status and "analog-sticks" in controller_status:
-                stick_side = "left" if self.is_left() else "right"
-                if stick_side in controller_status["analog-sticks"]:
-                    stick = controller_status["analog-sticks"][stick_side]
+                if self.is_pro():
+                    stick_sides = ("left", "right")
+                else:
+                    stick_sides = ("left",) if self.is_left() else ("right",)
+                for stick_side in stick_sides:
+                    stick = controller_status["analog-sticks"].get(stick_side, {})
                     vertical = stick.get("vertical", 0)
                     horizontal = stick.get("horizontal", 0)
                     if vertical < -0.5:
@@ -152,6 +175,9 @@ class JoyConWrapper(AbstractControllerWrapper):
     def is_left(self):
         """Checks if the JoyCon is a left JoyCon."""
         return self.joycon.is_left()
+
+    def is_pro(self):
+        return self.product_id == JOYCON_PRO_PRODUCT_ID
 
     async def handle_rumble_on_sound_index(self, sound_index):
         if not self.rumble_enabled:

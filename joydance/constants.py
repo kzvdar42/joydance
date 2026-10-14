@@ -184,6 +184,18 @@ BUTTON_MAPPING[JoyConButton.MINUS] = BUTTON_MAPPING[JoyConButton.PLUS]
 BUTTON_MAPPING[JoyConButton.L] = BUTTON_MAPPING[JoyConButton.R]
 BUTTON_MAPPING[JoyConButton.ZL] = BUTTON_MAPPING[JoyConButton.ZR]
 
+PRO_BUTTON_MAPPING = {
+    **BUTTON_MAPPING,
+    JoyConButton.UP: [Command.UP],
+    JoyConButton.RIGHT: [Command.RIGHT],
+    JoyConButton.DOWN: [Command.DOWN],
+    JoyConButton.LEFT: [Command.LEFT],
+    JoyConButton.MINUS: [Command.BACK],
+    JoyConButton.L: BUTTON_MAPPING[JoyConButton.R],
+    JoyConButton.ZL: BUTTON_MAPPING[JoyConButton.R],
+    JoyConButton.R: BUTTON_MAPPING[JoyConButton.ZR],
+}
+
 
 # Base controller state before connection
 BASE_CONTROLLER_STATE_INFO = {

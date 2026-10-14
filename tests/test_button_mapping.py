@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 from joydance.constants import Command
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
+from joydance.controllers.joycon.pycon.constants import JOYCON_R_PRODUCT_ID
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
 
@@ -12,6 +13,7 @@ from joydance.games.justdance_v2 import JustDanceGameV2
 def controller_with_buttons():
     controller = JoyConWrapper.__new__(JoyConWrapper)
     controller.serial = "test-controller"
+    controller.product_id = JOYCON_R_PRODUCT_ID
     controller.available_shortcuts = set()
     controller.joycon = SimpleNamespace(events=Mock(return_value=iter(())))
     return controller
