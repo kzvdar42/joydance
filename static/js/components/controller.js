@@ -56,12 +56,18 @@ class Controller extends Component {
         this.toggleRumble = this.toggleRumble.bind(this)
 
         this.state = {
-            ...props.controller,
+            controller: props.controller,
         }
     }
 
     componentDidMount() {
         window.mitty.on('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
+    }
+
+    componentDidUpdate(prevProps) {
+        if (prevProps.controller !== this.props.controller) {
+            this.setState({ controller: this.props.controller })
+        }
     }
 
     componentWillUnmount() {
@@ -77,7 +83,7 @@ class Controller extends Component {
     }
 
     toggleRumble() {
-        const newState = !this.state.rumble_enabled
+        const newState = !this.state.controller.rumble_enabled
         window.mitty.emit('req_' + WsCommand.TOGGLE_RUMBLE, {
             controller_serial: this.props.controller.serial,
             enabled: newState
@@ -91,13 +97,14 @@ class Controller extends Component {
 
         const state = data['state']
         if (PairingStateMessage.hasOwnProperty(state)) {
-            this.setState({
-                ...data,
-            })
+            this.setState(({ controller }) => ({
+                controller: { ...controller, ...data },
+            }))
         }
     }
 
-    render(props, { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message }) {
+    render(props, { controller }) {
+        const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message } = controller
         const controllerState = state
         const stateMessage = PairingStateMessage[controllerState]
 
@@ -107,7 +114,7 @@ class Controller extends Component {
             <li>
                 <div class="pure-g">
 
-                    <div class="pure-u-2-24 flex"><${ControllerIcon} ...${this.state} /></div>
+                    <div class="pure-u-2-24 flex"><${ControllerIcon} ...${controller} /></div>
                     <div class="pure-u-12-24 controller-info">
                         <div class="flex">
                             <span class="controller-name">${name}</span>
