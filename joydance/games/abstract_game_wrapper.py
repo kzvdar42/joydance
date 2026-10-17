@@ -26,9 +26,9 @@ class AbstractGameWrapper(ABC):
         self.reconnection_start_retry_delay = 1  # seconds
         self.reconnection_max_retry_delay = 30  # seconds
 
-    async def on_state_changed(self, serial, state):  # pylint: disable=method-hidden
+    async def on_state_changed(self, state):  # pylint: disable=method-hidden
         self._state.update(state)
-        await self._on_state_changed(serial, self._state)
+        await self._on_state_changed(self.controller.serial, self._state)
 
     async def on_game_message(self, message):  # pylint: disable=method-hidden
         await self._on_game_message(message)
@@ -59,7 +59,6 @@ class AbstractGameWrapper(ABC):
             logger.debug("Accepted connection from %s:%s", addr[0], addr[1])
         except Exception:
             await self.on_state_changed(
-                self.controller.serial,
                 {"state": PairingState.ERROR_HOLE_PUNCHING.value},
             )
             raise

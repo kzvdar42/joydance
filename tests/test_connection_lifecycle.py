@@ -99,7 +99,6 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         token_started.set()
                         await token_release.wait()
                         await game.on_state_changed(
-                            controller.serial,
                             {"state": PairingState.ERROR_CONNECTION.value},
                         )
                         raise RuntimeError("Token service unavailable")

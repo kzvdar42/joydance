@@ -74,7 +74,6 @@ class JustDanceGameV2(JustDanceGameAbstract):
         except ConnectionClosed as e:
             logger.warning("%s: V2 WebSocket connection closed: %s", self.controller.serial, e)
             await self.on_state_changed(
-                self.controller.serial,
                 {
                     "state": PairingState.ERROR_CONSOLE_CONNECTION.value,
                     "error_details": str(e),
@@ -84,7 +83,6 @@ class JustDanceGameV2(JustDanceGameAbstract):
         except ConnectionRefusedError as e:
             logger.error("%s: V2 Connection refused for %s: %s", self.controller.serial, self.pairing_url, e)
             await self.on_state_changed(
-                self.controller.serial,
                 {"state": PairingState.ERROR_CONSOLE_CONNECTION.value, "error_details": str(e)},
             )
             await self.disconnect()
@@ -94,7 +92,6 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 self.controller.serial,
             )
             await self.on_state_changed(
-                self.controller.serial,
                 {
                     "state": PairingState.ERROR_CONSOLE_CONNECTION.value,
                     "error_details": str(e),
@@ -122,7 +119,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
 
             if self.console_ip_addr:
                 await self.on_state_changed(
-                    self.controller.serial, {"state": PairingState.CONNECTING.value}
+                    {"state": PairingState.CONNECTING.value}
                 )
                 self.pairing_url = f"wss://{self.console_ip_addr}:8080/smartphone"
                 if getattr(self, "requires_punch_pairing", False):
@@ -141,19 +138,19 @@ class JustDanceGameV2(JustDanceGameAbstract):
                     await self.hole_punching()
             else:
                 await self.on_state_changed(
-                    self.controller.serial, {"state": PairingState.GETTING_TOKEN.value}
+                    {"state": PairingState.GETTING_TOKEN.value}
                 )
                 logger.debug("%s: V2 Getting authorization token...", self.controller.serial)
                 await self.get_access_token()
 
                 await self.on_state_changed(
-                    self.controller.serial, {"state": PairingState.PAIRING.value}
+                    {"state": PairingState.PAIRING.value}
                 )
                 logger.debug("%s: V2 Sending pairing code...", self.controller.serial)
                 await self.send_pairing_code()
 
                 await self.on_state_changed(
-                    self.controller.serial, {"state": PairingState.CONNECTING.value}
+                    {"state": PairingState.CONNECTING.value}
                 )
                 logger.debug("%s: V2 Connecting with console...", self.controller.serial)
                 if self.requires_punch_pairing:

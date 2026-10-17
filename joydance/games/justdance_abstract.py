@@ -89,7 +89,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             ) as resp:
                 if resp.status != 200:
                     await self.on_state_changed(
-                        self.controller.serial,
                         {"state": PairingState.ERROR_CONNECTION.value},
                     )
                     raise Exception("ERROR: Couldn't get access token!")
@@ -103,7 +102,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             async with session.get(url, params={"code": self.pairing_code}, ssl=False) as resp:
                 if resp.status != 200:
                     await self.on_state_changed(
-                        self.controller.serial,
                         {"state": PairingState.ERROR_INVALID_PAIRING_CODE.value},
                     )
                     raise Exception("ERROR: Invalid pairing code!")
@@ -128,7 +126,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 body = await resp.text()
                 if body != "OK":
                     await self.on_state_changed(
-                        self.controller.serial,
                         {"state": PairingState.ERROR_PUNCH_PAIRING.value},
                     )
                     raise Exception("ERROR: Couldn't initiate punch pairing!")
@@ -357,7 +354,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 # set to "disconnected" pattern
                 await self.controller.set_player_led(0)
                 await self.on_state_changed(
-                    self.controller.serial,
                     {"state": PairingState.DISCONNECTED.value}
                 )
 
@@ -409,7 +405,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "skin_image": profile_data_msg.get("skinImage"),
             "additional_message": profile_data_msg.get("additionalMessage"),
         }
-        await self.on_state_changed(self.controller.serial, self.profile_data)
+        await self.on_state_changed(self.profile_data)
 
     async def on_message(self, message_str):
         message = json.loads(message_str)
@@ -442,9 +438,9 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self.send_message("JD_PhoneDataCmdSyncEnd", {"phoneID": message["phoneID"]})
             self.is_connected = True
             await self.on_state_changed(
-                self.controller.serial, {"state": PairingState.CONNECTED.value}
+                {"state": PairingState.CONNECTED.value}
             )
-            await self.on_state_changed(self.controller.serial, {"state": PairingState.CONNECTED.value})
+            await self.on_state_changed({"state": PairingState.CONNECTED.value})
         elif __class == "JD_EnableAccelValuesSending_ConsoleCommandData":
             self.should_start_accelerometer = True
             self.number_of_accels_sent = 0

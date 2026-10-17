@@ -39,7 +39,7 @@ class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
             replacement = await client.ws_connect("/ws")
             another_browser = await client.ws_connect("/ws")
 
-            await game.on_state_changed("test", {"state": 4})
+            await game.on_state_changed({"state": 4})
             for browser in (replacement, another_browser):
                 response = await browser.receive_json(timeout=1)
                 self.assertEqual(response["cmd"], "resp_update_controller_state")
