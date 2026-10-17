@@ -71,7 +71,7 @@ class JoyCon:
         self.color_grip_right = None
         self.deadzone = {"left": 0, "right": 0}
         self._set_default_stick_calibration()
-        self.set_accel_calibration((0, 0, 0), (1, 1, 1))
+        self._set_default_accel_calibration()
 
         # connection state
         self._joycon_device = None
@@ -800,6 +800,7 @@ class JoyCon:
                 self._to_int16le_from_2bytes(imu_cal[10], imu_cal[11]),
             ))
         except Exception:
+            self._set_default_accel_calibration()
             logger.warning("%s: Error reading IMU calibration data; using defaults", self.serial)
             logger.debug("%s: Error reading IMU calibration data", self.serial, exc_info=True)
 
@@ -884,6 +885,11 @@ class JoyCon:
     def __del__(self):
         self._should_run.clear()
         self._close()
+
+    def _set_default_accel_calibration(self):
+        # Zero offsets and nominal +/-8 g sensitivity (0x4000) give 4096 raw counts per g.
+        # https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/imu_sensor_notes.md#accelerometer-calibrated---acceleration-in-g
+        self.set_accel_calibration((0, 0, 0), (16384, 16384, 16384))
 
     def set_accel_calibration(self, offset_xyz=None, coeff_xyz=None):
         if offset_xyz and coeff_xyz:
