@@ -54,6 +54,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.accel_acquisition_latency = accel_acquisition_latency
         self.accel_max_range = accel_max_range
         self.number_of_accels_sent = 0
+        self._scoring_session_id = 0
         self.should_start_accelerometer = False
         self.is_input_allowed = False
         self.profile_data = {}
@@ -175,6 +176,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         if frames < 3:
             return
         tmp_accel_data, self.accel_data = self.accel_data, []
+        scoring_session_id = self._scoring_session_id
         for start in range(0, len(tmp_accel_data), 10):
             batch = tmp_accel_data[start:start + 10]
             await self.send_message(
@@ -184,6 +186,9 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                     "timeStamp": self.number_of_accels_sent,
                 },
             )
+            # Scoring may stop or restart while the send yields.
+            if not self.should_start_accelerometer or scoring_session_id != self._scoring_session_id:
+                return
             self.number_of_accels_sent += len(batch)
 
     async def sleep_approx(self, target_duration):
@@ -440,10 +445,13 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             )
             await self.on_state_changed({"state": PairingState.CONNECTED.value})
         elif __class == "JD_EnableAccelValuesSending_ConsoleCommandData":
+            self._scoring_session_id += 1
+            self.accel_data.clear()
             self.controller.set_accel_collection(True)
             self.should_start_accelerometer = True
             self.number_of_accels_sent = 0
         elif __class == "JD_DisableAccelValuesSending_ConsoleCommandData":
+            self.accel_data.clear()
             self.controller.set_accel_collection(False)
             self.should_start_accelerometer = False
         elif __class == "InputSetup_ConsoleCommandData":

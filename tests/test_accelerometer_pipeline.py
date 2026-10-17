@@ -135,3 +135,64 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
                 controller.joycon._publish_input_report(motion_report(1))
                 await game.disconnect(should_reconnect=False)
                 self.assertEqual(controller.get_accel_events(), [])
+
+    async def test_scoring_boundaries_discard_old_samples(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                controller = self.controller()
+                game = game_class(controller, on_game_message=AsyncMock())
+                game.is_connected = True
+                game.send_message = AsyncMock()
+                enable = json.dumps({"__class": "JD_EnableAccelValuesSending_ConsoleCommandData"})
+                disable = json.dumps({"__class": "JD_DisableAccelValuesSending_ConsoleCommandData"})
+                await game.on_message(enable)
+                controller.joycon._publish_input_report(motion_report(1))
+                await game.collect_accelerometer_data()
+                controller.joycon._publish_input_report(motion_report(4))
+                await game.on_message(disable)
+                self.assertEqual(game.accel_data, [])
+                self.assertEqual(controller.get_accel_events(), [])
+                controller.joycon._publish_input_report(motion_report(7))
+                await game.on_message(enable)
+                controller.joycon._publish_input_report(motion_report(10))
+                await game.collect_accelerometer_data()
+                # A new enable also resets samples if no disable preceded it.
+                await game.on_message(enable)
+                self.assertEqual(game.accel_data, [])
+                controller.joycon._publish_input_report(motion_report(13))
+                await game.collect_accelerometer_data()
+                await game.send_accelerometer_data(3)
+                game.send_message.assert_awaited_once_with(
+                    "JD_PhoneScoringData",
+                    {"accelData": controller.joycon.get_accels(), "timeStamp": 0},
+                )
+
+    async def test_pending_send_stops_old_batches_without_changing_restart_timestamp(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            for restart in (False, True):
+                with self.subTest(protocol=game_class.__name__, restart=restart):
+                    controller = self.controller()
+                    game = game_class(controller, on_game_message=AsyncMock())
+                    enable = json.dumps({"__class": "JD_EnableAccelValuesSending_ConsoleCommandData"})
+                    disable = json.dumps({"__class": "JD_DisableAccelValuesSending_ConsoleCommandData"})
+                    await game.on_message(enable)
+                    game.number_of_accels_sent = 7
+                    game.accel_data = [(i, 0, 0) for i in range(21)]
+                    started, release = asyncio.Event(), asyncio.Event()
+
+                    async def send(command, data):
+                        started.set()
+                        await release.wait()
+
+                    game.send_message = AsyncMock(side_effect=send)
+                    sender = asyncio.create_task(game.send_accelerometer_data(3))
+                    try:
+                        await asyncio.wait_for(started.wait(), 1)
+                        await game.on_message(disable)
+                        if restart:
+                            await game.on_message(enable)
+                    finally:
+                        release.set()
+                        await asyncio.wait_for(sender, 1)
+                    self.assertEqual(game.send_message.await_count, 1)
+                    self.assertEqual(game.number_of_accels_sent, 0 if restart else 7)
