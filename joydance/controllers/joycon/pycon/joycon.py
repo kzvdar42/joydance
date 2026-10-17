@@ -76,7 +76,7 @@ class JoyCon:
         # connection state
         self._joycon_device = None
         self._update_input_report_thread = None
-        self.preconnect_event = threading.Event()
+        self._input_reader_gate = threading.Event()
         self.is_connected = threading.Event()
         self._should_run = threading.Event()
         self._connect_lock = asyncio.Lock()
@@ -236,7 +236,7 @@ class JoyCon:
                         raise ControllerConnectionError(
                             f"{id(self)} {self.serial}: connection attempt was stopped"
                         )
-                    self.preconnect_event.clear()
+                    self._input_reader_gate.clear()
                     self.is_connected.clear()
 
                 if reopening_after_close:
@@ -315,7 +315,7 @@ class JoyCon:
                         raise ControllerConnectionError(
                             f"{id(self)} {self.serial}: connection attempt was stopped"
                         )
-                    self.preconnect_event.set()
+                    self._input_reader_gate.set()
                     self._should_run.set()
 
                 started_new_input_thread = False
@@ -372,7 +372,7 @@ class JoyCon:
                             self._should_run.clear()
                             self.is_connected.clear()
                         if not is_connected:
-                            self.preconnect_event.set()
+                            self._input_reader_gate.set()
                         if self._active_connection_cancel is connection_cancel:
                             self._active_connection_cancel = None
 
@@ -484,7 +484,7 @@ class JoyCon:
                 connection_cancel.set()
             self._should_run.clear()
             self.is_connected.clear()
-            self.preconnect_event.set()
+            self._input_reader_gate.set()
             reconnect_future = self._reconnect_future
             joycon_device = self._joycon_device
             self._joycon_device = None
@@ -536,7 +536,7 @@ class JoyCon:
     def _update_input_report(self):
         while self._should_run.is_set():
             try:
-                self.preconnect_event.wait()
+                self._input_reader_gate.wait()
                 if not self._joycon_device:
                     # Check again if the thread should run
                     if not self._should_run.is_set():
