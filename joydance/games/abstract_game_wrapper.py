@@ -1,4 +1,5 @@
 from abc import ABC
+import asyncio
 import random
 import socket
 import logging
@@ -47,15 +48,18 @@ class AbstractGameWrapper(ABC):
     async def hole_punching(self):
         """Open a port on this machine so the console can connect to it."""
         try:
-            conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            conn.settimeout(10)
-            conn.bind(("0.0.0.0", self.host_port))
-            conn.listen(5)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
+                conn.setblocking(False)
+                conn.bind(("0.0.0.0", self.host_port))
+                conn.listen(5)
 
-            # Accept incoming connection from console
-            console_conn, addr = conn.accept()
-            self.console_conn = console_conn
+                # Accept incoming connection from console
+                async with asyncio.timeout(10):
+                    self.console_conn, addr = await asyncio.get_running_loop().sock_accept(conn)
             logger.debug("Accepted connection from %s:%s", addr[0], addr[1])
-        except Exception as e:
-            await self.on_state_changed({"state": PairingState.ERROR_HOLE_PUNCHING.value})
-            raise e
+        except Exception:
+            await self.on_state_changed(
+                self.controller.serial,
+                {"state": PairingState.ERROR_HOLE_PUNCHING.value},
+            )
+            raise

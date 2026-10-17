@@ -316,6 +316,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         was_connected = self.is_connected
         old_ws = self.ws
         self.ws = None
+        old_console_conn, self.console_conn = self.console_conn, None
         had_ws = old_ws is not None
         self.is_connected = False
         # A new connection may open a pause menu without repeating the stop-scoring message.
@@ -332,7 +333,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
         # Finish closing and notifying even if the owning connection loop is cancelled.
         cleanup = asyncio.create_task(
-            self._finish_disconnect(old_ws, was_connected or not should_reconnect)
+            self._finish_disconnect(old_ws, was_connected or not should_reconnect, old_console_conn)
         )
         cancelled = False
         while not cleanup.done():
@@ -344,11 +345,13 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _finish_disconnect(self, old_ws, notify_disconnected):
+    async def _finish_disconnect(self, old_ws, notify_disconnected, old_console_conn):
         try:
             if old_ws is not None and old_ws.state is not State.CLOSED:
                 await old_ws.close()
         finally:
+            if old_console_conn is not None:
+                old_console_conn.close()
             if notify_disconnected:
                 logger.debug("%s: Disconnected", self.controller.serial)
                 # set to "disconnected" pattern
