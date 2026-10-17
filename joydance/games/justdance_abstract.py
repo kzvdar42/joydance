@@ -315,6 +315,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.is_connected = False
         # A new connection may open a pause menu without repeating the stop-scoring message.
         self.should_start_accelerometer = False
+        self.controller.set_accel_collection(False)
         self.is_input_allowed = False
         self.accel_data.clear()
 
@@ -439,9 +440,11 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             )
             await self.on_state_changed({"state": PairingState.CONNECTED.value})
         elif __class == "JD_EnableAccelValuesSending_ConsoleCommandData":
+            self.controller.set_accel_collection(True)
             self.should_start_accelerometer = True
             self.number_of_accels_sent = 0
         elif __class == "JD_DisableAccelValuesSending_ConsoleCommandData":
+            self.controller.set_accel_collection(False)
             self.should_start_accelerometer = False
         elif __class == "InputSetup_ConsoleCommandData":
             if message.get("isEnabled", 0) == 1:

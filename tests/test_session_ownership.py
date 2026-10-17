@@ -15,6 +15,7 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.controller = SimpleNamespace(
             serial="test", is_connected=Mock(return_value=True),
+            set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
         )
         self.app = {

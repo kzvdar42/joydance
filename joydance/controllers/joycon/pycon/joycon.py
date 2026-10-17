@@ -63,6 +63,7 @@ class JoyCon:
         self._rumble_data = self._RUMBLE_DATA
         self._input_hooks = []
         self._input_report = bytes(self._INPUT_REPORT_SIZE)
+        self._accel_reports = None
         self._packet_number = 0
         self.color_body = (128, 128, 128)
         self.color_btn = (255, 255, 255)
@@ -468,6 +469,7 @@ class JoyCon:
         with self._connection_lifecycle_lock:
             joycon_device = self._joycon_device
             self._joycon_device = None
+            self._accel_reports = None
         if joycon_device:
             joycon_device.close()
 
@@ -475,6 +477,7 @@ class JoyCon:
         """Safely closes the connection without fully deleting the object"""
         with self._connection_lifecycle_lock:
             self._closed = True
+            self._accel_reports = None
             self._connection_generation += 1
             connection_cancel = self._active_connection_cancel
             if connection_cancel is not None:
@@ -577,6 +580,8 @@ class JoyCon:
             if self._closed or not self._should_run.is_set():
                 return
             self._input_report = report
+            if self._accel_reports is not None:
+                self._accel_reports.append(report)
             self.is_connected.set()
             input_hooks = tuple(self._input_hooks)
 
@@ -1019,8 +1024,21 @@ class JoyCon:
             | (self._get_nbit_from_input_report(11, 0, 8) << 4)
         return self.get_actual_stick_value(pre_cal, 1, "right")
 
-    def get_accels(self):
-        input_report = bytes(self._input_report)
+    def set_accel_collection(self, enabled):
+        with self._connection_lifecycle_lock:
+            self._accel_reports = [] if enabled else None
+
+    def get_accel_events(self):
+        """Drain received motion reports without consuming the status snapshot."""
+        with self._connection_lifecycle_lock:
+            if self._accel_reports is None:
+                return []
+            reports, self._accel_reports = self._accel_reports, []
+        return [sample for report in reports for sample in self.get_accels(report)]
+
+    def get_accels(self, input_report=None):
+        if input_report is None:
+            input_report = bytes(self._input_report)
         accels = []
 
         for idx in range(3):

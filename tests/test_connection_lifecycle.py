@@ -42,6 +42,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         controller = SimpleNamespace(
             serial="test-controller",
             is_connected=Mock(return_value=True),
+            set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
             get_joystick_command=Mock(return_value=None),
         )
@@ -105,6 +106,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     controller = SimpleNamespace(
                         serial="test-controller",
                         is_connected=Mock(return_value=True),
+                        set_accel_collection=Mock(),
                         set_player_led=AsyncMock(),
                         get_state=AsyncMock(return_value={"serial": "test-controller"}),
                     )
@@ -254,6 +256,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 controller = SimpleNamespace(
                     serial="test-controller",
                     is_connected=Mock(return_value=False),
+                    set_accel_collection=Mock(),
                     set_player_led=AsyncMock(),
                 )
                 on_state_changed = AsyncMock()
@@ -303,6 +306,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         controller = SimpleNamespace(
             serial="test-controller",
             is_connected=Mock(return_value=True),
+            set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
         )
         on_state_changed = AsyncMock()
@@ -345,6 +349,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         controller = SimpleNamespace(
             serial="test-controller",
             is_connected=Mock(return_value=True),
+            set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
         )
         on_state_changed = AsyncMock()

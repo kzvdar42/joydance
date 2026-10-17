@@ -15,7 +15,9 @@ from joydance.games.justdance_v2 import JustDanceGameV2
 
 class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_game_delivers_state_keyboard_and_rumble_after_browser_reconnect(self):
-        controller = SimpleNamespace(serial="test", set_player_led=AsyncMock(), set_rumble=Mock())
+        controller = SimpleNamespace(
+            serial="test", set_accel_collection=Mock(), set_player_led=AsyncMock(), set_rumble=Mock(),
+        )
         app = web.Application()
         app.update({
             "websockets": set(), "controllers": {"test": controller},

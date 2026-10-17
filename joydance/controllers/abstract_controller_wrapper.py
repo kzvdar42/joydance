@@ -59,8 +59,12 @@ class AbstractControllerWrapper(ABC):
         """Return the latest command from the controller (button press, etc)."""
         raise NotImplementedError
 
+    def set_accel_collection(self, enabled):
+        """Start with an empty motion buffer, or stop and discard pending samples."""
+        raise NotImplementedError
+
     def get_accel_events(self):
-        """Return accelerometer events from the controller. Returns a list of [x, y, z]."""
+        """Drain new accelerometer samples in arrival order as (x, y, z) tuples."""
         raise NotImplementedError
 
     def get_joystick_status(self):

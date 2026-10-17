@@ -12,6 +12,7 @@ class HolePunchingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         controller = SimpleNamespace(
             serial="hole-punch-test", is_connected=Mock(return_value=True),
+            set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
         )
         self.state_changed = AsyncMock()

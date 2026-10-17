@@ -102,9 +102,12 @@ class JoyConWrapper(AbstractControllerWrapper):
                     return cmd
         return None
 
+    def set_accel_collection(self, enabled):
+        self.joycon.set_accel_collection(enabled)
+
     def get_accel_events(self):
         try:
-            return self.joycon.get_accels()
+            return self.joycon.get_accel_events()
         except OSError:
             logger.exception("Error reading accelerometer data from JoyCon.")
             return []
