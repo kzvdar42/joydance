@@ -174,20 +174,17 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             return
         if frames < 3:
             return
-        tmp_accel_data = []
-        while len(self.accel_data):
-            tmp_accel_data.append(self.accel_data.pop(0))
-        while len(tmp_accel_data) > 0:
-            accels_num = min(len(tmp_accel_data), 10)
+        tmp_accel_data, self.accel_data = self.accel_data, []
+        for start in range(0, len(tmp_accel_data), 10):
+            batch = tmp_accel_data[start:start + 10]
             await self.send_message(
                 "JD_PhoneScoringData",
                 {
-                    "accelData": tmp_accel_data[:accels_num],
+                    "accelData": batch,
                     "timeStamp": self.number_of_accels_sent,
                 },
             )
-            self.number_of_accels_sent += accels_num
-            tmp_accel_data = tmp_accel_data[accels_num:]
+            self.number_of_accels_sent += len(batch)
 
     async def sleep_approx(self, target_duration):
         tmp_duration = target_duration

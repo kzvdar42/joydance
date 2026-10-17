@@ -19,6 +19,25 @@ from joydance.utils import ControllerConnectionError
 
 
 class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_accelerometer_batches_preserve_samples_and_timestamps(self):
+        game = JustDanceGameV2(SimpleNamespace(serial="test-controller"))
+        game.should_start_accelerometer = True
+        game.number_of_accels_sent = 7
+        samples = [(i, i + 1, i + 2) for i in range(21)]
+        game.accel_data = samples.copy()
+        game.send_message = AsyncMock()
+
+        await game.send_accelerometer_data(3)
+
+        self.assertEqual(game.send_message.await_count, 3)
+        for sent, start in zip(game.send_message.await_args_list, (0, 10, 20)):
+            self.assertEqual(sent.args, (
+                "JD_PhoneScoringData",
+                {"accelData": samples[start:start + 10], "timeStamp": 7 + start},
+            ))
+        self.assertEqual(game.number_of_accels_sent, 28)
+        self.assertEqual(game.accel_data, [])
+
     async def test_reconnect_from_song_accepts_pause_menu_input(self):
         controller = SimpleNamespace(
             serial="test-controller",
