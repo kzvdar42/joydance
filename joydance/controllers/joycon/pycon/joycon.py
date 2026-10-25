@@ -620,7 +620,8 @@ class JoyCon:
             callback(self)
 
     def _write_output_report(self, command, subcommand, argument):
-        if not self._joycon_device:
+        device = self._joycon_device
+        if not device:
             logger.debug(
                 "%s: Wanted to write output report, but JoyCon is not connected",
                 self.serial,
@@ -659,21 +660,18 @@ class JoyCon:
             len(report),
             self._rumble_data != JoyCon._RUMBLE_DATA,
         )
-        bytes_written = self._joycon_device.write(report)
+        bytes_written = device.write(report)
         # Windows HIDAPI can return the padded report length for short payloads.
         if bytes_written is not None and bytes_written < len(report):
             error = None
-            if hasattr(self._joycon_device, "error"):
+            if hasattr(device, "error"):
                 try:
-                    error = self._joycon_device.error()
+                    error = device.error()
                 except Exception:
                     error = None
-            logger.warning(
-                "%s: JoyCon output report write returned %s, expected %s; hid_error=%s",
-                self.serial,
-                bytes_written,
-                len(report),
-                error,
+            raise OSError(
+                f"{self.serial}: HID write returned {bytes_written}, "
+                f"expected at least {len(report)} bytes; hid_error={error}"
             )
         self._packet_number = (self._packet_number + 1) & 0xF
 
@@ -764,7 +762,7 @@ class JoyCon:
         argument = address.to_bytes(4, "little") + size.to_bytes(1, "little")
 
         def is_matching_spi_flash_read_response(response):
-            return len(response) >= 7 and response[2:7] == argument
+            return len(response) >= size + 7 and response[2:7] == argument
 
         ack, report = self._send_subcmd_get_response(
             b'\x10',

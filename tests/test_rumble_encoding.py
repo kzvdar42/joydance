@@ -23,18 +23,18 @@ class RumbleEncodingTests(unittest.TestCase):
             device.error.assert_not_called()
             self.assertEqual(len(device.write.call_args.args[0]), 10)
 
-    def test_failed_and_short_writes_still_warn(self):
-        for command, returned in ((b"\x10", -1), (b"\x10", 0), (b"\x10", 9), (b"\x01", 48)):
+    def test_failed_and_short_writes_raise(self):
+        for command, returned in ((b"\x10", -1), (b"\x10", 0), (b"\x10", 9),
+                                  (b"\x01", -1), (b"\x01", 0), (b"\x01", 48)):
             device = Mock(write=Mock(return_value=returned), error=Mock(return_value="mock HID error"))
             self.controller._joycon_device = device
             with (
                 self.subTest(command=command, returned=returned),
-                patch("joydance.controllers.joycon.pycon.joycon.logger.warning") as warning,
+                self.assertRaisesRegex(OSError, "mock HID error"),
             ):
                 self.controller._write_output_report(command, b"\x40", b"\x01")
-            warning.assert_called_once()
-            self.assertEqual(warning.call_args.args[2], returned)
             device.error.assert_called_once_with()
+            self.assertEqual(self.controller._packet_number, 0)
 
 
 

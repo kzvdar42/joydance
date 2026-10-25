@@ -414,6 +414,39 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
                 joycon.close()
 
+    async def test_failed_setup_write_closes_device_and_retries(self):
+        for bytes_written in (-1, 0, 48):
+            with self.subTest(bytes_written=bytes_written):
+                joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+                joycon._first_connection_timeout = 0
+                joycon._max_setup_attempts = 2
+                joycon.reconnect_timeout = 0
+                full_report = b"\x30" + bytes(48)
+
+                def write(report):
+                    return bytes_written if report[10] == 0x41 else len(report)
+
+                failed_device = Mock(read=Mock(return_value=full_report), write=Mock(side_effect=write))
+                device = Mock(read=Mock(return_value=full_report), write=Mock(side_effect=len))
+                joycon.register_update_hook(lambda controller: controller._should_run.clear())
+                with (
+                    patch.object(joycon, "_open", side_effect=[failed_device, device]) as open_device,
+                    patch.object(joycon, "_read_joycon_data"),
+                    patch("joydance.controllers.joycon.pycon.joycon.time.sleep"),
+                    patch("joydance.controllers.joycon.pycon.joycon.logger"),
+                ):
+                    try:
+                        self.assertTrue(await asyncio.wait_for(joycon.connect(), 1))
+                        self.assertEqual(open_device.call_count, 2)
+                        failed_device.close.assert_called_once()
+                        self.assertEqual(
+                            [call.args[0][10] for call in failed_device.write.call_args_list],
+                            [0x08, 0x03, 0x40, 0x41],
+                        )
+                        self.assertTrue(joycon.was_state_initialized)
+                    finally:
+                        joycon.close()
+
     async def test_stopping_connection_while_waiting_for_reader_does_not_open_device(self):
         for action in ("cancel", "close"):
             with self.subTest(action=action):
@@ -538,6 +571,54 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class JoyConReportTests(unittest.TestCase):
+    def test_truncated_full_reports_do_not_publish_or_refresh_connection(self):
+        joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+        self.addCleanup(joycon.close)
+        joycon._should_run.set()
+        joycon.set_accel_collection(True)
+        hook = Mock()
+        joycon.register_update_hook(hook)
+        original = joycon._input_report
+        with patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", return_value=10) as clock:
+            for length in range(49):
+                report = b"\x30" + bytes(length - 1) if length else b""
+                joycon._publish_input_report(report)
+                self.assertEqual(joycon._input_report, original)
+                self.assertFalse(joycon.is_connected.is_set())
+                self.assertIsNone(joycon._input_report_deadline)
+            hook.assert_not_called()
+            full_report = b"\x30" + bytes(48)
+            joycon._publish_input_report(full_report)
+            clock.return_value = 11
+            joycon._publish_input_report(full_report[:-1])
+            self.assertEqual(joycon._input_report, full_report)
+            self.assertTrue(joycon.is_connected.is_set())
+            self.assertEqual(joycon._input_report_deadline, 12)
+            self.assertEqual(joycon._accel_reports, [full_report])
+            hook.assert_called_once_with(joycon)
+
+    def test_spi_read_retries_matching_replies_with_incomplete_payloads(self):
+        for size in (2, 6, 24, 29):
+            with self.subTest(size=size):
+                joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+                self.addCleanup(joycon.close)
+                address = 0x6050
+                argument = address.to_bytes(4, "little") + bytes([size])
+                payload = bytes(range(size))
+                response = b"\x90\x10" + argument + payload
+                with (
+                    patch.object(joycon, "_write_output_report") as write,
+                    patch.object(joycon, "_read_input_report", side_effect=[
+                        b"\x21" + bytes(12) + data
+                        for data in (response[:7], response[:-1], response)
+                    ]),
+                    patch("joydance.controllers.joycon.pycon.joycon.time.monotonic",
+                          side_effect=[0, 0, 0.25, 0.5, 0.51]),
+                ):
+                    self.assertEqual(joycon._spi_flash_read(address, size), payload)
+                self.assertEqual(write.call_count, 3)
+                write.assert_called_with(b"\x01", b"\x10", argument)
+
     def test_manual_stop_during_read_does_not_trigger_stream_timeout(self):
         joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
         self.addCleanup(joycon.close)
