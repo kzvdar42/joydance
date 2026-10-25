@@ -70,6 +70,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.is_search_opened = False
         self.reconnection_task = None
         self.pair_task = None
+        self._rumble_task = None
         self.should_reconnect = True
         self.requires_punch_pairing = False
 
@@ -304,6 +305,19 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            await self._stop_rumble()
+
+    async def _play_rumble(self, sound_index):
+        try:
+            await self.controller.handle_rumble_on_sound_index(sound_index)
+        except Exception:
+            logger.exception("%s: Error playing rumble.", self.controller.serial)
+
+    async def _stop_rumble(self):
+        task, self._rumble_task = self._rumble_task, None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def disconnect(self, should_reconnect = True):
         self.should_reconnect = should_reconnect
@@ -350,6 +364,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             if old_ws is not None and old_ws.state is not State.CLOSED:
                 await old_ws.close()
         finally:
+            await self._stop_rumble()
             if old_console_conn is not None:
                 old_console_conn.close()
             if notify_disconnected:
@@ -436,7 +451,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self.controller.set_player_led(self.profile_data.get("player_id", 0))
         elif __class == "JD_PlaySound_ConsoleCommandData":
             sound_index = message.get("soundIndex", 0)
-            await self.controller.handle_rumble_on_sound_index(sound_index)
+            await self._stop_rumble()
+            self._rumble_task = asyncio.create_task(self._play_rumble(sound_index))
         elif __class == "JD_PhoneDataCmdSyncEnd":
             await self.send_message("JD_PhoneDataCmdSyncEnd", {"phoneID": message["phoneID"]})
             self.is_connected = True

@@ -185,33 +185,32 @@ class JoyConWrapper(AbstractControllerWrapper):
     async def handle_rumble_on_sound_index(self, sound_index):
         if not self.rumble_enabled:
             return
-        if sound_index == 0:  # Coach selection
-            self.rumble(frequency=160.0, amplitude=0.3)
-            await asyncio.sleep(0.15)
-            self.stop_rumble()
-        elif 1 <= sound_index <= 5:  # Stars (1-5)
-            strength = 0.3 + (sound_index * 0.12)
-            duration = 0.1 + (sound_index * 0.05)
-            self.rumble(frequency=240.0, amplitude=strength)
-            await asyncio.sleep(duration)
-            self.stop_rumble()
-        elif sound_index == 6:  # Megastar
-            for amp_val in [0.5, 0.7, 1.0]:
-                self.rumble(frequency=320.0, amplitude=amp_val)
+        try:
+            if sound_index == 0:  # Coach selection
+                self.rumble(frequency=160.0, amplitude=0.3)
+                await asyncio.sleep(0.15)
+            elif 1 <= sound_index <= 5:  # Stars (1-5)
+                strength = 0.3 + (sound_index * 0.12)
+                duration = 0.1 + (sound_index * 0.05)
+                self.rumble(frequency=240.0, amplitude=strength)
+                await asyncio.sleep(duration)
+            elif sound_index == 6:  # Megastar
+                for amp_val in [0.5, 0.7, 1.0]:
+                    self.rumble(frequency=320.0, amplitude=amp_val)
+                    await asyncio.sleep(0.15)
+                    self.stop_rumble()
+                    await asyncio.sleep(0.08)
+            elif sound_index == 7:  # Star move
+                self.rumble(frequency=280.0, amplitude=0.8)
+                await asyncio.sleep(0.2)
+            elif sound_index == 8:  # Start dance
+                self.rumble(frequency=240.0, amplitude=0.6)
                 await asyncio.sleep(0.15)
                 self.stop_rumble()
-                await asyncio.sleep(0.08)
-        elif sound_index == 7:  # Star move
-            self.rumble(frequency=280.0, amplitude=0.8)
-            await asyncio.sleep(0.2)
-            self.stop_rumble()
-        elif sound_index == 8:  # Start dance
-            self.rumble(frequency=240.0, amplitude=0.6)
-            await asyncio.sleep(0.15)
-            self.stop_rumble()
-            await asyncio.sleep(0.1)
-            self.rumble(frequency=320.0, amplitude=0.8)
-            await asyncio.sleep(0.2)
+                await asyncio.sleep(0.1)
+                self.rumble(frequency=320.0, amplitude=0.8)
+                await asyncio.sleep(0.2)
+        finally:
             self.stop_rumble()
 
     async def set_player_led(self, player_id):
