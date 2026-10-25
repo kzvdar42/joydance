@@ -638,7 +638,8 @@ class JoyCon:
             self._rumble_data != JoyCon._RUMBLE_DATA,
         )
         bytes_written = self._joycon_device.write(report)
-        if bytes_written is not None and bytes_written != len(report):
+        # Windows HIDAPI can return the padded report length for short payloads.
+        if bytes_written is not None and bytes_written < len(report):
             error = None
             if hasattr(self._joycon_device, "error"):
                 try:
@@ -876,6 +877,13 @@ class JoyCon:
         # Enable 6 axis sensors
         self._write_output_report(b'\x01', b'\x40', b'\x01')
         # It needs delta time to update the setting
+        time.sleep(0.02)
+        # IMU enable only resets sensitivity if previously disabled; calibration requires +/-8 g.
+        # https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/bluetooth_hid_subcommands_notes.md#subcommand-0x41-set-imu-sensitivity
+        # +/-2000 dps, +/-8 g, 208 Hz gyro, 100 Hz accelerometer filter.
+        self._write_output_report(b'\x01', b'\x41', b'\x03\x00\x01\x01')
+        time.sleep(0.02)
+        self._write_output_report(b'\x01', b'\x48', b'\x01')
         time.sleep(0.02)
         # Change format of input report
         self._write_output_report(b'\x01', b'\x03', b'\x30')
@@ -1197,7 +1205,7 @@ class JoyCon:
             return
 
         self._rumble_data = self.encode_rumble_data(frequency, amplitude)
-        # Send a dummy subcommand to trigger the rumble
+        # Report 0x10 carries rumble without a subcommand.
         self._write_output_report(b'\x10', b'\x00', b'\x00')
 
     def stop_rumble(self):

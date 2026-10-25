@@ -10,6 +10,8 @@ from websockets.protocol import State
 from joydance.constants import Command, PairingState
 from joydance.controllers.joycon.pycon.constants import (
     JOYCON_L_PRODUCT_ID,
+    JOYCON_R_PRODUCT_ID,
+    JOYCON_PRO_PRODUCT_ID,
     JOYCON_VENDOR_ID,
 )
 from joydance.controllers.joycon.pycon.joycon import JoyCon
@@ -414,6 +416,34 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class JoyConReportTests(unittest.TestCase):
+    def test_sensor_setup_explicitly_restores_settings_on_every_call(self):
+        # Wire values from bluetooth_hid_subcommands_notes.md, commands 0x40/0x41/0x48/0x03.
+        expected = [
+            b"\x40\x01\x00\x00\x00",
+            b"\x41\x03\x00\x01\x01",
+            b"\x48\x01\x00\x00\x00",
+            b"\x03\x30\x00\x00\x00",
+        ]
+        for product_id in (JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID):
+            for rumble_enabled in (False, True):
+                with self.subTest(product_id=product_id, rumble_enabled=rumble_enabled):
+                    joycon = JoyCon(JOYCON_VENDOR_ID, product_id, "test-controller")
+                    self.addCleanup(joycon.close)
+                    joycon.rumble_enabled = rumble_enabled
+                    device = Mock()
+                    device.write.side_effect = len
+                    joycon._joycon_device = device
+                    with patch("joydance.controllers.joycon.pycon.joycon.time.sleep"):
+                        joycon._setup_sensors()
+                        joycon._setup_sensors()
+                    reports = [call.args[0] for call in device.write.call_args_list]
+                    self.assertEqual([report[10:15] for report in reports], expected * 2)
+                    self.assertTrue(all(report[0] == 1 and len(report) == 49 for report in reports))
+                    self.assertEqual(joycon.rumble_enabled, rumble_enabled)
+                    if not rumble_enabled:
+                        joycon.rumble(320, 0.5)
+                        self.assertEqual(device.write.call_count, len(reports))
+
     def test_valid_reply_does_not_trigger_resend(self):
         joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
         response = b"\x80\x10current"

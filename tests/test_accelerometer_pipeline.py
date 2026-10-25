@@ -3,8 +3,9 @@ import json
 import struct
 import threading
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
+from joydance.constants import Command
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
 from joydance.controllers.joycon.pycon.constants import (
     JOYCON_L_PRODUCT_ID,
@@ -48,6 +49,78 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 self.assertEqual(controller.get_accel_events(), expected)
                 self.assertEqual(controller.get_accel_events(), [])
+
+    def test_reader_restores_full_mode_and_recovers_buttons_and_motion(self):
+        for product_id in (JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID):
+            with self.subTest(product_id=product_id):
+                controller = self.controller(product_id)
+                joycon = controller.joycon
+                joycon._input_reader_gate.set()
+                joycon._publish_input_report(motion_report(100))
+                controller.set_accel_collection(True)
+                fresh = bytearray(motion_report(1))
+                fresh[5 if controller.is_left() else 3] |= 4 if controller.is_left() else 8
+                fresh = bytes(fresh)
+                restored = False
+                reads = 0
+
+                def write(report):
+                    nonlocal restored
+                    if report[0] == 1 and report[10:12] == b"\x03\x30":
+                        restored = True
+                    return len(report)
+
+                def read(**kwargs):
+                    nonlocal reads
+                    reads += 1
+                    if restored:
+                        return fresh
+                    if reads >= 4:
+                        joycon._should_run.clear()
+                    return b"\x3f" + bytes(48)
+
+                device = Mock(read=Mock(side_effect=read), write=Mock(side_effect=write))
+                joycon._joycon_device = device
+                joycon.register_update_hook(lambda device: device._should_run.clear())
+                with patch("joydance.controllers.joycon.pycon.joycon.logger.warning") as warning:
+                    joycon._update_input_report()
+
+                self.assertTrue(restored)
+                warning.assert_called_once()
+                self.assertEqual(reads, 2)
+                self.assertEqual(
+                    [call.args[0][10:15] for call in device.write.call_args_list],
+                    [b"\x40\x01\x00\x00\x00", b"\x41\x03\x00\x01\x01",
+                     b"\x48\x01\x00\x00\x00", b"\x03\x30\x00\x00\x00"],
+                )
+                self.assertEqual(controller.get_latest_command(), Command.ACCEPT)
+                self.assertEqual(controller.get_accel_events(), joycon.get_accels(fresh))
+
+    def test_mode_restore_retries_are_throttled_and_reset_after_full_reports(self):
+        controller = self.controller()
+        joycon = controller.joycon
+        joycon._input_reader_gate.set()
+        joycon._joycon_device = Mock()
+        clock = 0
+        reports = iter([(0, 0x3F), (0.1, 0x3F), (0.3, 0x3F), (0.31, 0x30),
+                        (0.32, 0x3F), (0.33, 0x30)])
+
+        def read():
+            nonlocal clock
+            clock, report_id = next(reports)
+            if clock == 0.33:
+                joycon.register_update_hook(lambda device: device._should_run.clear())
+            return bytes([report_id]) + bytes(48)
+
+        with (
+            patch.object(joycon, "_read_input_report", side_effect=read),
+            patch.object(joycon, "_setup_sensors") as restore,
+            patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock),
+            self.assertLogs("joydance.controllers.joycon.pycon.joycon", level="WARNING") as logs,
+        ):
+            joycon._update_input_report()
+        self.assertEqual(restore.call_count, 3)
+        self.assertEqual(len(logs.output), 2)
 
     def test_status_reads_do_not_consume_pending_motion(self):
         controller = self.controller()
