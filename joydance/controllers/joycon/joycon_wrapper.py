@@ -24,6 +24,7 @@ class JoyConWrapper(AbstractControllerWrapper):
         self.joycon = ButtonEventJoyCon(vendor_id, product_id, serial)
         self.rumble_enabled = True
         self._is_battery_level_initialized = False
+        self._led_transition_task = None
         self._initialize_state()
         self._state["controller_type"] = {
             JOYCON_L_PRODUCT_ID: "joycon_left",
@@ -161,6 +162,7 @@ class JoyConWrapper(AbstractControllerWrapper):
 
     def close(self):
         """Closes the connection to the JoyCon."""
+        self._stop_led_transition()
         self.joycon.close()
 
     async def connect(self):
@@ -213,14 +215,46 @@ class JoyConWrapper(AbstractControllerWrapper):
         finally:
             self.stop_rumble()
 
-    async def set_player_led(self, player_id):
+    def _stop_led_transition(self):
+        task, self._led_transition_task = self._led_transition_task, None
+        if task is not None:
+            task.cancel()
+
+    async def _sweep_player_led(self):
+        for pattern in (1, 2, 4, 8):
+            self.joycon.set_player_lamp(pattern)
+            await asyncio.sleep(0.15)
+
+    async def animate_connecting_led(self):
+        self._stop_led_transition()
+        try:
+            while True:
+                await self._sweep_player_led()
+        except Exception:
+            logger.exception("Error animating connecting LEDs on JoyCon.")
+
+    async def _animate_player_led(self, pattern, move_to_unassigned=False):
+        try:
+            if move_to_unassigned:
+                await self._sweep_player_led()
+            for _ in range(2):
+                await asyncio.sleep(0.35)
+                self.joycon.set_player_lamp(0)
+                await asyncio.sleep(0.35)
+                self.joycon.set_player_lamp(pattern)
+        except Exception:
+            logger.exception("Error animating player LED transition on JoyCon.")
+
+    async def set_player_led(self, player_id, flash=False):
         """Sets the player LED to the corresponding pattern.
 
         player_id can be set to 0 for "disconnected" pattern.
 
         Args:
             player_id (int): The player ID, starting from 1.
+            flash (bool): Blink the pattern twice without delaying the caller.
         """
+        self._stop_led_transition()
         # better works after battery level is read
         if not self._is_battery_level_initialized:
             await self.battery_level()
@@ -237,6 +271,12 @@ class JoyConWrapper(AbstractControllerWrapper):
         }
         lamp_pattern = patterns.get(player_id, 8)
         try:
-            self.joycon.set_player_lamp(lamp_pattern)
+            move_to_unassigned = flash and player_id == 0
+            if not move_to_unassigned:
+                self.joycon.set_player_lamp(lamp_pattern)
+            if flash:
+                self._led_transition_task = asyncio.create_task(
+                    self._animate_player_led(lamp_pattern, move_to_unassigned=move_to_unassigned)
+                )
         except Exception:
             logger.exception("Error setting player LED on JoyCon.")

@@ -22,6 +22,72 @@ from joydance.utils import ControllerConnectionError
 
 
 class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_connecting_led_stops_before_the_final_pattern(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            for outcome in ("profile", "sync", "failure", "cancel", "disconnect"):
+                with self.subTest(protocol=game_class.__name__, outcome=outcome):
+                    animation_started = asyncio.Event()
+                    pair_finished = asyncio.Event()
+
+                    async def animate():
+                        animation_started.set()
+                        await asyncio.Event().wait()
+
+                    controller = SimpleNamespace(
+                        serial="led-test", is_connected=Mock(return_value=True),
+                        set_accel_collection=Mock(), set_player_led=AsyncMock(),
+                        animate_connecting_led=AsyncMock(side_effect=animate),
+                    )
+                    game = game_class(
+                        controller, on_state_changed=AsyncMock(), on_game_message=AsyncMock()
+                    )
+                    with patch.object(game, "pair", new=pair_finished.wait):
+                        task = await game.start_pair()
+                        try:
+                            await asyncio.wait_for(animation_started.wait(), 1)
+                            animation = game._connecting_led_task
+                            if outcome in ("profile", "sync"):
+                                if outcome == "sync":
+                                    game.send_message = AsyncMock()
+                                    await game.on_message(json.dumps({
+                                        "__class": "JD_PhoneDataCmdSyncEnd", "phoneID": 1,
+                                    }))
+                                    self.assertFalse(animation.done())
+                                    controller.set_player_led.assert_not_awaited()
+                                    await game.on_message(json.dumps({
+                                        "__class": "JD_ProfilePhoneUiData", "name": "Pending",
+                                    }))
+                                    self.assertFalse(animation.done())
+                                    controller.set_player_led.assert_not_awaited()
+                                await game.on_message(json.dumps({
+                                    "__class": "JD_ProfilePhoneUiData", "playerId": 1,
+                                }))
+                            elif outcome == "failure":
+                                pair_finished.set()
+                                await asyncio.wait_for(asyncio.shield(task), 1)
+                            elif outcome == "cancel":
+                                task.cancel()
+                                with self.assertRaises(asyncio.CancelledError):
+                                    await task
+                            else:
+                                await game.disconnect(should_reconnect=False)
+                            self.assertTrue(animation.cancelled())
+                            self.assertIsNone(game._connecting_led_task)
+                            if outcome in ("profile", "sync"):
+                                controller.set_player_led.assert_awaited_once_with(2, flash=True)
+                                await game.on_message(json.dumps({
+                                    "__class": "JD_ProfilePhoneUiData", "playerId": 1,
+                                }))
+                                controller.set_player_led.assert_awaited_once_with(2, flash=True)
+                                await game.on_message(json.dumps({
+                                    "__class": "JD_ProfilePhoneUiData", "playerId": 2,
+                                }))
+                                controller.set_player_led.assert_awaited_with(3, flash=False)
+                            else:
+                                controller.set_player_led.assert_awaited_once_with(0, flash=True)
+                        finally:
+                            await game.disconnect(should_reconnect=False)
+
     async def test_game_disconnect_restores_unassigned_leds_after_hid_reconnect(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):
             for offline in (False, True):
@@ -44,6 +110,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     if offline:
                         controller.joycon._joycon_device = None
                     await game.disconnect(should_reconnect=False)
+                    await controller._led_transition_task
                     if not offline:
                         self.assertEqual(device.write.call_args.args[0][10:12], b"\x30\x08")
 
@@ -141,6 +208,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         is_connected=Mock(return_value=True),
                         set_accel_collection=Mock(),
                         set_player_led=AsyncMock(),
+                        animate_connecting_led=AsyncMock(),
                         get_state=AsyncMock(return_value={"serial": "test-controller"}),
                     )
                     on_state_changed = AsyncMock()
@@ -303,7 +371,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.05)
                     close_finished.set()
 
-                async def set_led(player_id):
+                async def set_led(player_id, flash=False):
                     await asyncio.sleep(0.05)
 
                 controller.set_player_led.side_effect = set_led
@@ -326,7 +394,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.gather(task, return_exceptions=True)
                         await game.stop_reconnection()
 
-                controller.set_player_led.assert_awaited_once_with(0)
+                controller.set_player_led.assert_awaited_once_with(0, flash=True)
                 self.assertTrue(close_finished.is_set())
                 on_state_changed.assert_awaited_once_with(
                     controller.serial,
@@ -341,6 +409,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
             is_connected=Mock(return_value=True),
             set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
+            animate_connecting_led=AsyncMock(),
         )
         on_state_changed = AsyncMock()
         game = JustDanceGameV2(controller, on_state_changed=on_state_changed)
@@ -372,7 +441,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(game.should_reconnect)
         self.assertIsNone(game.reconnection_task)
         close.assert_awaited_once()
-        controller.set_player_led.assert_awaited_once_with(0)
+        controller.set_player_led.assert_awaited_once_with(0, flash=True)
         on_state_changed.assert_awaited_once_with(
             controller.serial,
             {"state": PairingState.DISCONNECTED.value, "connection_requested": False},
@@ -412,7 +481,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(task, return_exceptions=True)
 
         self.assertTrue(close_finished.is_set())
-        controller.set_player_led.assert_awaited_once_with(0)
+        controller.set_player_led.assert_awaited_once_with(0, flash=True)
         on_state_changed.assert_awaited_once_with(
             controller.serial,
             {"state": PairingState.DISCONNECTED.value, "connection_requested": False},

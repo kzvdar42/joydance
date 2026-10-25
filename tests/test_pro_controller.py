@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, call, patch
 
@@ -176,6 +177,84 @@ class ProControllerTests(unittest.TestCase):
 
 
 class ProControllerStateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_assignment_and_disconnect_flash_twice_and_leave_the_correct_pattern(self):
+        for player_id, pattern in ((0, 8), (1, 1), (2, 3), (3, 7), (4, 15), (5, 9), (6, 5), (7, 13), (8, 6)):
+            with self.subTest(player_id=player_id):
+                controller = JoyConWrapper(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "led-test")
+                self.addCleanup(controller.close)
+                controller._is_battery_level_initialized = True
+                with (
+                    patch.object(controller.joycon, "set_player_lamp") as lamp,
+                    patch("joydance.controllers.joycon.joycon_wrapper.asyncio.sleep", new=AsyncMock()) as sleep,
+                ):
+                    await controller.set_player_led(player_id, flash=True)
+                    if player_id == 0:
+                        lamp.assert_not_called()
+                    else:
+                        lamp.assert_called_once_with(pattern)
+                    await controller._led_transition_task
+                    transition = [call(n) for n in (1, 2, 4, 8)] if player_id == 0 else [call(pattern)]
+                    self.assertEqual(lamp.call_args_list, transition + [call(0), call(pattern)] * 2)
+                    movement_delays = [call(0.15)] * 4 if player_id == 0 else []
+                    self.assertEqual(sleep.await_args_list, movement_delays + [call(0.35)] * 4)
+
+    async def test_disconnect_or_close_cancels_pending_player_flash(self):
+        for action in ("disconnect", "close"):
+            with self.subTest(action=action):
+                controller = JoyConWrapper(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "led-test")
+                self.addCleanup(controller.close)
+                controller._is_battery_level_initialized = True
+                turned_off = asyncio.Event()
+                sleeps = 0
+
+                async def pause(delay):
+                    nonlocal sleeps
+                    sleeps += 1
+                    if sleeps == 2:
+                        turned_off.set()
+                        await asyncio.Event().wait()
+
+                with (
+                    patch.object(controller.joycon, "set_player_lamp") as lamp,
+                    patch("joydance.controllers.joycon.joycon_wrapper.asyncio.sleep", side_effect=pause),
+                ):
+                    await controller.set_player_led(1, flash=True)
+                    task = controller._led_transition_task
+                    await asyncio.wait_for(turned_off.wait(), 1)
+                    if action == "disconnect":
+                        await controller.set_player_led(0, flash=True)
+                    else:
+                        controller.close()
+                    await asyncio.gather(task, return_exceptions=True)
+                    self.assertTrue(task.cancelled())
+                    expected = [call(1), call(0)]
+                    if action == "disconnect":
+                        await controller._led_transition_task
+                        expected.extend(call(n) for n in (1, 2, 4, 8, 0, 8, 0, 8))
+                    self.assertEqual(lamp.call_args_list, expected)
+
+    async def test_connecting_led_moves_one_dot_across_all_four_lights(self):
+        for product_id in (JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID):
+            with self.subTest(product_id=product_id):
+                controller = JoyConWrapper(JOYCON_VENDOR_ID, product_id, "led-test")
+                self.addCleanup(controller.close)
+                controller._is_battery_level_initialized = True
+                with (
+                    patch.object(controller.joycon, "set_player_lamp") as lamp,
+                    patch(
+                        "joydance.controllers.joycon.joycon_wrapper.asyncio.sleep",
+                        new=AsyncMock(side_effect=[None] * 4 + [asyncio.CancelledError()]),
+                    ) as sleep,
+                ):
+                    await controller.set_player_led(0, flash=True)
+                    disconnect_flash = controller._led_transition_task
+                    with self.assertRaises(asyncio.CancelledError):
+                        await controller.animate_connecting_led()
+                    await asyncio.gather(disconnect_flash, return_exceptions=True)
+                    self.assertTrue(disconnect_flash.cancelled())
+                self.assertEqual(lamp.call_args_list, [call(n) for n in (1, 2, 4, 8, 1)])
+                self.assertEqual(sleep.await_args_list, [call(0.15)] * 5)
+
     async def test_name_and_icon_type_before_and_after_device_setup(self):
         for product_id, name, controller_type in (
             (JOYCON_PRO_PRODUCT_ID, "Pro Controller", "pro_controller"),

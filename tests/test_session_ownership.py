@@ -17,6 +17,7 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
             serial="test", is_connected=Mock(return_value=True),
             set_accel_collection=Mock(),
             set_player_led=AsyncMock(),
+            animate_connecting_led=AsyncMock(),
         )
         self.app = {
             "controllers": {"test": self.controller},

@@ -87,12 +87,17 @@ class AbstractControllerWrapper(ABC):
         """Handle rumble patterns based on sound index (async)."""
         raise NotImplementedError
 
-    async def set_player_led(self, player_id):
+    async def animate_connecting_led(self):
+        """Animate the connecting LEDs until cancelled by the game session."""
+        raise NotImplementedError
+
+    async def set_player_led(self, player_id, flash=False):
         """Sets the player LED to the corresponding pattern.
 
         player_id can be set to 0 for "disconnected" pattern.
 
         Args:
             player_id (int): The player ID, starting from 1.
+            flash (bool): Blink the pattern twice without delaying the caller.
         """
         raise NotImplementedError

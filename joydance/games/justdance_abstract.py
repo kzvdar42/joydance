@@ -71,6 +71,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.reconnection_task = None
         self.pair_task = None
         self._rumble_task = None
+        self._connecting_led_task = None
         self.should_reconnect = True
         self.requires_punch_pairing = False
 
@@ -257,9 +258,25 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     async def start_pair(self):
         await self.stop_pair()
         self._state["connection_requested"] = True
-        self.pair_task = asyncio.create_task(self.pair())
+        self.pair_task = asyncio.create_task(self._pair_with_connecting_led())
         self.pair_task.add_done_callback(self._clear_pair_task)
         return self.pair_task
+
+    async def _pair_with_connecting_led(self):
+        self._connecting_led_task = asyncio.create_task(self.controller.animate_connecting_led())
+        try:
+            await self.pair()
+        finally:
+            if await self._stop_connecting_led() and self._state.get("connection_requested"):
+                await self.controller.set_player_led(0, flash=True)
+
+    async def _stop_connecting_led(self):
+        task, self._connecting_led_task = self._connecting_led_task, None
+        if task is None:
+            return False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
 
     def _clear_pair_task(self, task):
         if self.pair_task is task:
@@ -367,10 +384,11 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self._stop_rumble()
             if old_console_conn is not None:
                 old_console_conn.close()
+            was_connecting = await self._stop_connecting_led()
+            if notify_disconnected or was_connecting:
+                await self.controller.set_player_led(0, flash=True)
             if notify_disconnected:
                 logger.debug("%s: Disconnected", self.controller.serial)
-                # set to "disconnected" pattern
-                await self.controller.set_player_led(0)
                 await self.on_state_changed(
                     {"state": PairingState.DISCONNECTED.value}
                 )
@@ -447,8 +465,14 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         if __class == "JD_PhoneDataCmdHandshakeContinue":
             await self.send_message("JD_PhoneDataCmdSync", {"phoneID": message["phoneID"]})
         elif __class == "JD_ProfilePhoneUiData":
+            previous_player_id = self.profile_data.get("player_id")
             await self.parse_profile_data(message)
-            await self.controller.set_player_led(self.profile_data.get("player_id", 0))
+            player_id = self.profile_data.get("player_id")
+            if player_id is not None and (
+                player_id != previous_player_id or self._connecting_led_task is not None
+            ):
+                was_connecting = await self._stop_connecting_led()
+                await self.controller.set_player_led(player_id, flash=was_connecting)
         elif __class == "JD_PlaySound_ConsoleCommandData":
             sound_index = message.get("soundIndex", 0)
             await self._stop_rumble()
