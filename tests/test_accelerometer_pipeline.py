@@ -91,7 +91,8 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     [call.args[0][10:15] for call in device.write.call_args_list],
                     [b"\x40\x01\x00\x00\x00", b"\x41\x03\x00\x01\x01",
-                     b"\x48\x01\x00\x00\x00", b"\x03\x30\x00\x00\x00"],
+                     b"\x48\x01\x00\x00\x00", b"\x03\x30\x00\x00\x00",
+                     b"\x30\x08\x00\x00\x00"],
                 )
                 self.assertEqual(controller.get_latest_command(), Command.ACCEPT)
                 self.assertEqual(controller.get_accel_events(), joycon.get_accels(fresh))

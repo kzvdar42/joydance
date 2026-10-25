@@ -63,6 +63,7 @@ class JoyCon:
 
         # setup internal state
         self._rumble_data = self._RUMBLE_DATA
+        self._player_lamp_pattern = 8  # Unassigned, matching JoyConWrapper's fallback pattern.
         self._input_hooks = []
         self._input_report = bytes(self._INPUT_REPORT_SIZE)
         self._input_report_deadline = None
@@ -907,6 +908,9 @@ class JoyCon:
         time.sleep(0.02)
         # Change format of input report
         self._write_output_report(b'\x01', b'\x03', b'\x30')
+        # A disconnect can change the requested LEDs while the device is offline.
+        self._write_output_report(
+            b'\x01', b'\x30', self._player_lamp_pattern.to_bytes(1, byteorder='little'))
         logger.debug("%s: _setup_sensors done", self.serial)
 
     @staticmethod
@@ -1234,17 +1238,15 @@ class JoyCon:
         self._write_output_report(b'\x10', b'\x00', b'\x00')
 
     def set_player_lamp_on(self, on_pattern: int):
-        self._write_output_report(
-            b'\x01', b'\x30',
-            (on_pattern & 0xF).to_bytes(1, byteorder='little'))
+        self.set_player_lamp(on_pattern & 0xF)
 
     def set_player_lamp_flashing(self, flashing_pattern: int):
-        self._write_output_report(
-            b'\x01', b'\x30',
-            ((flashing_pattern & 0xF) << 4).to_bytes(1, byteorder='little'))
+        self.set_player_lamp((flashing_pattern & 0xF) << 4)
 
     def set_player_lamp(self, pattern: int):
         logger.debug("%s %s: set_player_lamp %s", id(self), self.serial, pattern)
+        argument = pattern.to_bytes(1, byteorder='little')
+        self._player_lamp_pattern = pattern
         self._write_output_report(
             b'\x01', b'\x30',
-            pattern.to_bytes(1, byteorder='little'))
+            argument)

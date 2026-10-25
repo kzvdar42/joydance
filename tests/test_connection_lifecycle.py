@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from websockets.protocol import State
 
 from joydance.constants import Command, PairingState
+from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
 from joydance.controllers.joycon.pycon.constants import (
     JOYCON_L_PRODUCT_ID,
     JOYCON_R_PRODUCT_ID,
@@ -21,6 +22,36 @@ from joydance.utils import ControllerConnectionError
 
 
 class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_game_disconnect_restores_unassigned_leds_after_hid_reconnect(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            for offline in (False, True):
+                with self.subTest(protocol=game_class.__name__, offline=offline):
+                    controller = JoyConWrapper(
+                        JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller"
+                    )
+                    self.addCleanup(controller.close)
+                    controller._is_battery_level_initialized = True
+                    device = Mock()
+                    device.write.side_effect = len
+                    controller.joycon._joycon_device = device
+                    await controller.set_player_led(2)
+                    with patch("joydance.controllers.joycon.pycon.joycon.time.sleep"):
+                        controller.joycon._setup_sensors()
+                    self.assertEqual(device.write.call_args.args[0][10:12], b"\x30\x03")
+
+                    game = game_class(controller, on_state_changed=AsyncMock())
+                    game.is_connected = True
+                    if offline:
+                        controller.joycon._joycon_device = None
+                    await game.disconnect(should_reconnect=False)
+                    if not offline:
+                        self.assertEqual(device.write.call_args.args[0][10:12], b"\x30\x08")
+
+                    controller.joycon._joycon_device = device
+                    with patch("joydance.controllers.joycon.pycon.joycon.time.sleep"):
+                        controller.joycon._setup_sensors()
+                    self.assertEqual(device.write.call_args.args[0][10:12], b"\x30\x08")
+
     async def test_accelerometer_batches_preserve_samples_and_timestamps(self):
         game = JustDanceGameV2(SimpleNamespace(serial="test-controller"))
         game.should_start_accelerometer = True
@@ -772,12 +803,13 @@ class JoyConReportTests(unittest.TestCase):
                 self.assertFalse(reader.is_alive())
 
     def test_sensor_setup_explicitly_restores_settings_on_every_call(self):
-        # Wire values from bluetooth_hid_subcommands_notes.md, commands 0x40/0x41/0x48/0x03.
+        # Wire values from bluetooth_hid_subcommands_notes.md, commands 0x40/0x41/0x48/0x03/0x30.
         expected = [
             b"\x40\x01\x00\x00\x00",
             b"\x41\x03\x00\x01\x01",
             b"\x48\x01\x00\x00\x00",
             b"\x03\x30\x00\x00\x00",
+            b"\x30\x08\x00\x00\x00",
         ]
         for product_id in (JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID):
             for rumble_enabled in (False, True):
