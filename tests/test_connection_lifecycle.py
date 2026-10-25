@@ -414,8 +414,161 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
                 joycon.close()
 
+    async def test_stopping_connection_while_waiting_for_reader_does_not_open_device(self):
+        for action in ("cancel", "close"):
+            with self.subTest(action=action):
+                joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+                device = Mock()
+                joycon._joycon_device = device
+                waiting = threading.Event()
+                wait_for_reader = joycon._wait_for_input_reader
+
+                def wait():
+                    waiting.set()
+                    wait_for_reader()
+
+                joycon._input_reader_lock.acquire()
+                lock_held = True
+                with (
+                    patch.object(joycon, "_wait_for_input_reader", side_effect=wait),
+                    patch.object(joycon, "_open") as open_device,
+                ):
+                    connection = asyncio.create_task(joycon.connect())
+                    try:
+                        self.assertTrue(await asyncio.to_thread(waiting.wait, 1))
+                        if action == "cancel":
+                            connection.cancel()
+                        else:
+                            joycon.close()
+                        joycon._input_reader_lock.release()
+                        lock_held = False
+                        expected = asyncio.CancelledError if action == "cancel" else ControllerConnectionError
+                        with self.assertRaises(expected):
+                            await asyncio.wait_for(connection, 1)
+                        open_device.assert_not_called()
+                        device.close.assert_called_once()
+                        self.assertFalse(joycon._connect_lock.locked())
+                        self.assertFalse(joycon.is_connected.is_set())
+                        self.assertIsNone(joycon._joycon_device)
+                        self.assertTrue(joycon._input_reader_gate.is_set())
+                    finally:
+                        if lock_held:
+                            joycon._input_reader_lock.release()
+                        joycon.close()
+                        connection.cancel()
+                        await asyncio.gather(connection, return_exceptions=True)
+
+    async def test_reconnect_waits_for_reader_and_keeps_setup_replies(self):
+        for pending_report in (b"", b"\x21" + bytes(48), b"\x3f" + bytes(48),
+                               b"\x30" + bytes(48), OSError("old HID read failed")):
+            with self.subTest(pending_report=pending_report):
+                joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+                joycon._first_connection_timeout = 0
+                joycon._max_setup_attempts = 1
+                joycon.reconnect_timeout = 0
+                joycon._should_run.set()
+                joycon._input_reader_gate.set()
+                joycon.is_connected.set()
+                read_started = threading.Event()
+                read_release = threading.Event()
+                gate_closed = threading.Event()
+
+                def read_old(**kwargs):
+                    read_started.set()
+                    if not read_release.wait(2):
+                        raise TimeoutError("Test did not release the old HID read")
+                    if isinstance(pending_report, Exception):
+                        raise pending_report
+                    return pending_report
+
+                old_device = Mock(read=Mock(side_effect=read_old))
+                reply = b"\x21" + bytes(12) + b"\x80\x10setup"
+                new_device = Mock(
+                    read=Mock(side_effect=[reply, b"\x30" + bytes(48)]),
+                    write=Mock(side_effect=len),
+                )
+                joycon._joycon_device = old_device
+                clear_gate = joycon._input_reader_gate.clear
+
+                def pause():
+                    clear_gate()
+                    gate_closed.set()
+
+                def setup():
+                    self.assertEqual(
+                        joycon._send_subcmd_get_response(b"\x10", b"request", timeout=1),
+                        (0x80, b"\x80\x10setup"),
+                    )
+
+                joycon.register_update_hook(lambda controller: controller._should_run.clear())
+                with (
+                    patch.object(joycon._input_reader_gate, "clear", side_effect=pause),
+                    patch.object(joycon, "_open", return_value=new_device) as open_device,
+                    patch.object(joycon, "_prepare_input_reports"),
+                    patch.object(joycon, "_wait_for_any_input_report"),
+                    patch.object(joycon, "_read_joycon_data", side_effect=setup),
+                    patch.object(joycon, "_setup_sensors"),
+                    patch.object(joycon, "_schedule_reconnect_from_reader"),
+                    patch("joydance.controllers.joycon.pycon.joycon.logger"),
+                ):
+                    reader = threading.Thread(target=joycon._update_input_report, daemon=True)
+                    joycon._update_input_report_thread = reader
+                    reader.start()
+                    connection = None
+                    try:
+                        self.assertTrue(await asyncio.to_thread(read_started.wait, 1))
+                        connection = asyncio.create_task(joycon.connect())
+                        self.assertTrue(await asyncio.to_thread(gate_closed.wait, 1))
+                        await asyncio.sleep(0.02)
+                        old_device.close.assert_not_called()
+                        open_device.assert_not_called()
+                        read_release.set()
+                        self.assertTrue(await asyncio.wait_for(connection, 2))
+                        old_device.close.assert_called_once()
+                        self.assertEqual(old_device.read.call_count, 1)
+                        self.assertEqual(new_device.read.call_count, 2)
+                    finally:
+                        read_release.set()
+                        joycon.close()
+                        if connection is not None:
+                            connection.cancel()
+                            await asyncio.gather(connection, return_exceptions=True)
+                        await asyncio.to_thread(reader.join, 1)
+                        self.assertFalse(reader.is_alive())
+
 
 class JoyConReportTests(unittest.TestCase):
+    def test_reader_rechecks_gate_after_waiting_for_lock(self):
+        joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+        device = Mock()
+        joycon._joycon_device = device
+        joycon._should_run.set()
+        joycon._input_reader_gate.set()
+        first_wait = threading.Event()
+        paused = threading.Event()
+        wait_for_gate = joycon._input_reader_gate.wait
+
+        def wait(timeout=None):
+            if first_wait.is_set():
+                paused.set()
+            result = wait_for_gate(timeout)
+            first_wait.set()
+            return result
+
+        with patch.object(joycon._input_reader_gate, "wait", side_effect=wait):
+            reader = threading.Thread(target=joycon._update_input_report, daemon=True)
+            try:
+                with joycon._input_reader_lock:
+                    reader.start()
+                    self.assertTrue(first_wait.wait(1))
+                    joycon._input_reader_gate.clear()
+                self.assertTrue(paused.wait(1))
+                device.read.assert_not_called()
+            finally:
+                joycon.close()
+                reader.join(1)
+                self.assertFalse(reader.is_alive())
+
     def test_sensor_setup_explicitly_restores_settings_on_every_call(self):
         # Wire values from bluetooth_hid_subcommands_notes.md, commands 0x40/0x41/0x48/0x03.
         expected = [

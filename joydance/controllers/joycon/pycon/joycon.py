@@ -77,6 +77,7 @@ class JoyCon:
         self._joycon_device = None
         self._update_input_report_thread = None
         self._input_reader_gate = threading.Event()
+        self._input_reader_lock = threading.Lock()
         self.is_connected = threading.Event()
         self._should_run = threading.Event()
         self._connect_lock = asyncio.Lock()
@@ -254,6 +255,12 @@ class JoyCon:
                             raise ControllerConnectionError(
                                 f"{id(self)} {self.serial}: previous input reader did not stop"
                             )
+
+                await self._run_in_thread(self._wait_for_input_reader)
+                self._ensure_connection_attempt_is_current(
+                    connection_generation,
+                    connection_cancel,
+                )
 
                 if self._joycon_device:
                     try:
@@ -533,46 +540,49 @@ class JoyCon:
                 self._loop,
             )
 
+    def _wait_for_input_reader(self):
+        with self._input_reader_lock:
+            # A report published before pausing must not satisfy the new connection.
+            self.is_connected.clear()
+
     def _update_input_report(self):
         next_mode_restore = 0
         while self._should_run.is_set():
-            try:
-                self._input_reader_gate.wait()
-                if not self._joycon_device:
-                    # Check again if the thread should run
-                    if not self._should_run.is_set():
-                        return
-                    self._schedule_reconnect_from_reader()
-                    time.sleep(self.reconnect_timeout)
+            if not self._input_reader_gate.wait(self._INPUT_READ_TIMEOUT_MS / 1000):
+                continue
+            with self._input_reader_lock:
+                if not self._input_reader_gate.is_set() or not self._should_run.is_set():
                     continue
-
-                report = [0]
-                # Skip subcommand replies; recover full mode when basic reports arrive.
-                while (len(report) == 0 or report[0] != 0x30) and self._should_run.is_set():
-                    report = self._read_input_report()
-                    if report is None:
-                        raise OSError("joycon_device is None!")
-                    # Basic reports omit motion; restore full mode if it changes after setup.
-                    if report and report[0] == 0x3F and time.monotonic() >= next_mode_restore:
-                        if next_mode_restore == 0:
-                            logger.warning("%s: Basic input reports received; restoring full mode", self.serial)
-                        self._setup_sensors()
-                        next_mode_restore = time.monotonic() + self._subcommand_resend_interval
-
-                self._publish_input_report(report)
-                if report and report[0] == 0x30:
-                    next_mode_restore = 0
-            except OSError:
-                logger.exception("%s %s: connection lost to hid device", id(self), self.serial)
-                self.is_connected.clear()
                 try:
-                    self._close()
+                    if not self._joycon_device:
+                        self._schedule_reconnect_from_reader()
+                    else:
+                        report = self._read_input_report()
+                        if report is None:
+                            raise OSError("joycon_device is None!")
+                        if not self._input_reader_gate.is_set():
+                            continue
+                        # Basic reports omit motion; restore full mode if it changes after setup.
+                        if report and report[0] == 0x3F and time.monotonic() >= next_mode_restore:
+                            if next_mode_restore == 0:
+                                logger.warning("%s: Basic input reports received; restoring full mode", self.serial)
+                            self._setup_sensors()
+                            next_mode_restore = time.monotonic() + self._subcommand_resend_interval
+
+                        self._publish_input_report(report)
+                        if report and report[0] == 0x30:
+                            next_mode_restore = 0
+                        continue
+                except OSError:
+                    logger.exception("%s %s: connection lost to hid device", id(self), self.serial)
+                    self.is_connected.clear()
+                    try:
+                        self._close()
+                    except Exception:
+                        logger.debug("%s: error closing device after read failure", self.serial, exc_info=True)
                 except Exception:
-                    logger.debug("%s: error closing device after read failure", self.serial, exc_info=True)
-                time.sleep(self.reconnect_timeout)
-            except Exception:
-                logger.exception("%s %s: Unexpected error in input report:", id(self), self.serial)
-                time.sleep(self.reconnect_timeout)
+                    logger.exception("%s %s: Unexpected error in input report:", id(self), self.serial)
+            time.sleep(self.reconnect_timeout)
         self._update_input_report_thread = None
 
     def _read_input_report(self) -> bytes:
