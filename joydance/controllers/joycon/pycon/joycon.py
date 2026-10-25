@@ -534,6 +534,7 @@ class JoyCon:
             )
 
     def _update_input_report(self):
+        next_mode_restore = 0
         while self._should_run.is_set():
             try:
                 self._input_reader_gate.wait()
@@ -546,13 +547,21 @@ class JoyCon:
                     continue
 
                 report = [0]
-                # TODO, handle input reports of type 0x21 and 0x3f
+                # Skip subcommand replies; recover full mode when basic reports arrive.
                 while (len(report) == 0 or report[0] != 0x30) and self._should_run.is_set():
                     report = self._read_input_report()
                     if report is None:
                         raise OSError("joycon_device is None!")
+                    # Basic reports omit motion; restore full mode if it changes after setup.
+                    if report and report[0] == 0x3F and time.monotonic() >= next_mode_restore:
+                        if next_mode_restore == 0:
+                            logger.warning("%s: Basic input reports received; restoring full mode", self.serial)
+                        self._setup_sensors()
+                        next_mode_restore = time.monotonic() + self._subcommand_resend_interval
 
                 self._publish_input_report(report)
+                if report and report[0] == 0x30:
+                    next_mode_restore = 0
             except OSError:
                 logger.exception("%s %s: connection lost to hid device", id(self), self.serial)
                 self.is_connected.clear()
