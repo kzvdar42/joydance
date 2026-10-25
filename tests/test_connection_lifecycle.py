@@ -538,6 +538,127 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class JoyConReportTests(unittest.TestCase):
+    def test_manual_stop_during_read_does_not_trigger_stream_timeout(self):
+        joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+        self.addCleanup(joycon.close)
+        joycon._should_run.set()
+        joycon._input_reader_gate.set()
+        clock = 0
+
+        def read(**kwargs):
+            nonlocal clock
+            clock = 3
+            joycon.close()
+            return b""
+
+        device = Mock(read=Mock(side_effect=read))
+        joycon._joycon_device = device
+        with (
+            patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock),
+            patch("joydance.controllers.joycon.pycon.joycon.logger") as logger,
+            patch.object(joycon, "_schedule_reconnect_from_reader") as reconnect,
+        ):
+            joycon._publish_input_report(b"\x30" + bytes(48))
+            joycon._update_input_report()
+        device.close.assert_called_once()
+        self.assertFalse(joycon.is_connected.is_set())
+        logger.exception.assert_not_called()
+        reconnect.assert_not_called()
+
+    def test_stalled_stream_disconnects_and_schedules_reconnect(self):
+        for report in (b"", b"\x21" + bytes(48), b"\x3f" + bytes(48),
+                       b"\x30", b"\x31" + bytes(48)):
+            with self.subTest(report=report):
+                joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+                self.addCleanup(joycon.close)
+                joycon.reconnect_timeout = 0
+                joycon._should_run.set()
+                joycon._input_reader_gate.set()
+                joycon.set_accel_collection(True)
+                clock = 0
+
+                def read(**kwargs):
+                    nonlocal clock
+                    clock += 1
+                    if clock >= 3:
+                        joycon._should_run.clear()
+                    return report
+
+                device = Mock(read=Mock(side_effect=read))
+                joycon._joycon_device = device
+                with (
+                    patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock),
+                    patch("joydance.controllers.joycon.pycon.joycon.logger"),
+                    patch.object(joycon, "_setup_sensors"),
+                    patch.object(joycon, "_schedule_reconnect_from_reader", side_effect=joycon._should_run.clear) as reconnect,
+                ):
+                    joycon._publish_input_report(b"\x30" + bytes(48))
+                    joycon._update_input_report()
+                self.assertFalse(joycon.is_connected.is_set())
+                device.close.assert_called_once()
+                reconnect.assert_called_once()
+                self.assertEqual(device.read.call_count, 2)
+                self.assertEqual(joycon.get_accel_events(), [])
+
+    def test_full_reports_reset_timeout_after_short_gaps(self):
+        for report in (b"", b"\x21" + bytes(48), b"\x3f" + bytes(48)):
+            with self.subTest(report=report):
+                joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+                self.addCleanup(joycon.close)
+                joycon._should_run.set()
+                joycon._input_reader_gate.set()
+                full_report = b"\x30" + bytes(48)
+                reports = iter([(1.9, report), (1.95, full_report), (3.8, report), (3.9, full_report)])
+                clock = 0
+
+                def read(**kwargs):
+                    nonlocal clock
+                    clock, data = next(reports)
+                    return data
+
+                def stop(controller):
+                    if clock == 3.9:
+                        controller._should_run.clear()
+
+                device = Mock(read=Mock(side_effect=read))
+                joycon._joycon_device = device
+                with (
+                    patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock),
+                    patch("joydance.controllers.joycon.pycon.joycon.logger"),
+                    patch.object(joycon, "_setup_sensors"),
+                    patch.object(joycon, "_schedule_reconnect_from_reader") as reconnect,
+                ):
+                    joycon._publish_input_report(full_report)
+                    joycon.register_update_hook(stop)
+                    joycon._update_input_report()
+                self.assertTrue(joycon.is_connected.is_set())
+                self.assertEqual(device.read.call_count, 4)
+                device.close.assert_not_called()
+                reconnect.assert_not_called()
+
+    def test_setup_pause_resets_stream_timeout_until_first_new_full_report(self):
+        joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
+        self.addCleanup(joycon.close)
+        joycon._should_run.set()
+        full_report = b"\x30" + bytes(48)
+        device = Mock(read=Mock(side_effect=[b"", full_report]))
+        joycon._joycon_device = device
+        clock = 0
+        with (
+            patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock),
+            patch.object(joycon, "_schedule_reconnect_from_reader") as reconnect,
+        ):
+            joycon._publish_input_report(full_report)
+            joycon._wait_for_input_reader()
+            clock = 10
+            joycon._input_reader_gate.set()
+            joycon.register_update_hook(lambda controller: controller._should_run.clear())
+            joycon._update_input_report()
+        self.assertTrue(joycon.is_connected.is_set())
+        self.assertEqual(device.read.call_count, 2)
+        device.close.assert_not_called()
+        reconnect.assert_not_called()
+
     def test_reader_rechecks_gate_after_waiting_for_lock(self):
         joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")
         device = Mock()

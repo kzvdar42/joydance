@@ -58,11 +58,14 @@ class JoyCon:
         self._first_report_attempts = 30
         # Seconds to wait for first 0x30 input report after setup (thread must publish is_connected)
         self._first_input_report_timeout = 5.0
+        # Short Bluetooth gaps are tolerated; only full reports prove the stream is usable.
+        self._input_report_timeout = 2.0
 
         # setup internal state
         self._rumble_data = self._RUMBLE_DATA
         self._input_hooks = []
         self._input_report = bytes(self._INPUT_REPORT_SIZE)
+        self._input_report_deadline = None
         self._accel_reports = None
         self._packet_number = 0
         self.color_body = (128, 128, 128)
@@ -544,6 +547,7 @@ class JoyCon:
         with self._input_reader_lock:
             # A report published before pausing must not satisfy the new connection.
             self.is_connected.clear()
+            self._input_report_deadline = None
 
     def _update_input_report(self):
         next_mode_restore = 0
@@ -560,7 +564,7 @@ class JoyCon:
                         report = self._read_input_report()
                         if report is None:
                             raise OSError("joycon_device is None!")
-                        if not self._input_reader_gate.is_set():
+                        if not self._input_reader_gate.is_set() or not self._should_run.is_set():
                             continue
                         # Basic reports omit motion; restore full mode if it changes after setup.
                         if report and report[0] == 0x3F and time.monotonic() >= next_mode_restore:
@@ -570,6 +574,13 @@ class JoyCon:
                             next_mode_restore = time.monotonic() + self._subcommand_resend_interval
 
                         self._publish_input_report(report)
+                        if (
+                            self._input_report_deadline is not None
+                            and time.monotonic() >= self._input_report_deadline
+                        ):
+                            raise TimeoutError(
+                                f"No valid full input report for {self._input_report_timeout:.1f}s"
+                            )
                         if report and report[0] == 0x30:
                             next_mode_restore = 0
                         continue
@@ -592,13 +603,14 @@ class JoyCon:
             ))
 
     def _publish_input_report(self, report):
-        if len(report) == 0 or report[0] != 0x30:
+        if len(report) < self._INPUT_REPORT_SIZE or report[0] != 0x30:
             return
 
         with self._connection_lifecycle_lock:
             if self._closed or not self._should_run.is_set():
                 return
             self._input_report = report
+            self._input_report_deadline = time.monotonic() + self._input_report_timeout
             if self._accel_reports is not None:
                 self._accel_reports.append(report)
             self.is_connected.set()
