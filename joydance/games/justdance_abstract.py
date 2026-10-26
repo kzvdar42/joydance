@@ -447,7 +447,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         message = json.loads(message_str)
         __class = message.get("__class")
 
-        if __class != "JD_PhoneUiSetupData":
+        if __class != "JD_PhoneUiSetupData" or message.get("isPopup"):
             logger.debug(
                 "%s-%s: <<< %s",
                 self.controller.serial,

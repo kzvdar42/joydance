@@ -405,6 +405,20 @@ select option {
     }
 }
 
+.player-role {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: #163650;
+    color: #90caf9;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1.4;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
 .player-color {
     border-radius: 50%;
     width: 12px;

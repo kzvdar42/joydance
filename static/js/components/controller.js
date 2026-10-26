@@ -104,7 +104,7 @@ class Controller extends Component {
     }
 
     render(props, { controller }) {
-        const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message } = controller
+        const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message, is_main_player } = controller
         const controllerState = state
         const stateMessage = PairingStateMessage[controllerState]
 
@@ -125,6 +125,7 @@ class Controller extends Component {
                             <div class="player-info">
                                 <span class="player-color" style="background-color: rgba(${player_color[0]}, ${player_color[1]}, ${player_color[2]}, ${player_color[3]})"></span>
                                 <span>P${player_id}: ${player_name}</span>
+                                ${controllerState == PairingState.CONNECTED && is_main_player && html`<span class="player-role">Main</span>`}
                                 ${additional_message && html`<span>${additional_message}</span>`}
                             </div>
                         `}

@@ -1,7 +1,10 @@
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+
+from websockets.protocol import State
 
 from joydance.constants import Command
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
@@ -140,6 +143,107 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
         self.game = JustDanceGameV1(
             self.controller, on_state_changed=AsyncMock(), on_game_message=AsyncMock()
         )
+
+    async def test_navigation_ownership_is_published_without_changing_player_number_or_leds(self):
+        updates = []
+        self.game._on_state_changed = AsyncMock(side_effect=lambda serial, state: updates.append(state.copy()))
+        self.game.profile_data = {"player_id": 2}
+        self.controller.set_player_led = AsyncMock()
+        await self.game.on_message(json.dumps(menu_setup()))
+        self.assertEqual(updates, [{"is_main_player": True}])
+        await self.game.on_message(json.dumps(menu_setup()))
+        self.assertEqual(len(updates), 1)
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiSetupData",
+            "inputSetup": {"isEnabled": 1},
+            "setupData": {"__class": "JD_SimplePhoneUiData"},
+        }))
+        self.assertEqual(updates[-1], {"is_main_player": False})
+        popup = menu_setup()
+        popup["isPopup"] = 1
+        await self.game.on_message(json.dumps(popup))
+        self.assertEqual(len(updates), 2)
+        self.assertFalse((await self.game.get_state(pull_new_data=False))["is_main_player"])
+        self.assertEqual(self.game.profile_data["player_id"], 2)
+        self.controller.set_player_led.assert_not_awaited()
+
+    async def test_secondary_player_can_confirm_takeover_popup_then_navigate(self):
+        self.controller.set_player_led = AsyncMock()
+        for explicit_action in (False, True):
+            with self.subTest(explicit_action=explicit_action):
+                await self.game.on_message(json.dumps({
+                    "__class": "JD_ProfilePhoneUiData", "playerId": 1,
+                }))
+                await self.game.on_message(json.dumps({
+                    "__class": "JD_PhoneUiSetupData",
+                    "inputSetup": {"isEnabled": 1},
+                    "setupData": {"__class": "JD_SimplePhoneUiData"},
+                }))
+                self.assertFalse(self.game.is_main_player)
+                self.assertFalse(self.game.is_input_allowed)
+
+                popup = menu_setup()
+                popup["isPopup"] = 1
+                # Captured from the takeover popup; the app forwards this supplied command.
+                action = {"__class": "JD_Input_PhoneCommandData", "input": 185785632}
+                if explicit_action:
+                    popup["setupData"]["mainCarousel"]["rows"][0]["items"][0]["actions"] = [
+                        {"command": json.dumps({"root": action})}
+                    ]
+                await self.game.on_message(json.dumps(popup))
+                self.assertFalse(self.game.is_main_player)
+                self.assertTrue(self.game.is_input_allowed)
+
+                self.controller.joycon.events.return_value = iter([("a", 1)])
+                self.controller.get_joystick_command = Mock(return_value=None)
+                self.game.is_connected = True
+                self.game.ws = SimpleNamespace(state=State.OPEN)
+                sent = asyncio.Event()
+                self.game.send_message = AsyncMock(side_effect=lambda *args: sent.set())
+                task = asyncio.create_task(self.game.send_command())
+                try:
+                    await asyncio.wait_for(sent.wait(), 1)
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                expected = (
+                    ("JD_Input_PhoneCommandData", {"input": action["input"]})
+                    if explicit_action else (
+                        "ValidateAction_PhoneCommandData",
+                        {"rowIndex": 0, "itemIndex": 0, "actionIndex": 0},
+                    )
+                )
+                self.game.send_message.assert_awaited_once_with(*expected)
+                self.assertEqual(await self.game.preprocess_command(Command.ACCEPT), expected)
+
+                await self.game.on_message(json.dumps(menu_setup()))
+                await self.game.on_message(json.dumps({
+                    "__class": "JD_ProfilePhoneUiData", "playerId": 1,
+                }))
+                self.assertEqual(self.game.profile_data["player_id"], 2)
+                self.assertTrue(self.game.is_main_player)
+                self.assertEqual(await self.game.preprocess_command(Command.RIGHT), (
+                    "ChangeItem_PhoneCommandData", {"rowIndex": 0, "itemIndex": 1},
+                ))
+
+    async def test_closing_secondary_player_popup_restores_navigation_restrictions(self):
+        self.controller.set_player_led = AsyncMock()
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiSetupData",
+            "inputSetup": {"isEnabled": 1},
+            "setupData": {"__class": "JD_SimplePhoneUiData"},
+        }))
+        await self.game.on_message(json.dumps({
+            "__class": "JD_ProfilePhoneUiData", "playerId": 0,
+        }))
+        self.assertFalse(self.game.is_main_player)
+        popup = menu_setup()
+        popup["isPopup"] = 1
+        await self.game.on_message(json.dumps(popup))
+        await self.game.on_message(json.dumps({"__class": "JD_ClosePopup_ConsoleCommandData"}))
+        self.assertFalse(self.game.is_main_player)
+        for command in (Command.ACCEPT, Command.LEFT, Command.RIGHT):
+            self.assertEqual(await self.game.preprocess_command(command), (None, None))
 
     async def test_trigger_cycles_actions_and_accept_confirms_selected_action(self):
         await self.game.on_message(json.dumps(menu_setup()))

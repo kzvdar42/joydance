@@ -88,12 +88,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
         await super().on_message(message_str)
         message_dict = json.loads(message_str)
         __class = message_dict.get("__class")
-        if __class == "JD_ProfilePhoneUiData":
-            player_id = self.profile_data.get("player_id")
-            if player_id is not None:
-                self.is_main_player = player_id == 1
-
-        elif __class == "InputSetup_ConsoleCommandData":
+        if __class == "InputSetup_ConsoleCommandData":
             await self.parse_carousel_position_setup_data(message_dict)
 
         elif __class == "JD_ClosePopup_ConsoleCommandData":
@@ -136,12 +131,17 @@ class JustDanceGameV1(JustDanceGameAbstract):
         if data.get("isPopup"):
             self._pre_pop_up_carousel_type = self.current_carousel_type
             self.current_carousel_type = "popup"
-        elif setup_data.get("lobbySetup"):
-            self.current_carousel_type = "lobby"
-        elif setup_data.get("recapSetup"):
-            self.current_carousel_type = "recap"
         else:
-            self.current_carousel_type = "main"
+            # Navigation ownership follows the supplied UI, not the player's scoring slot.
+            self.is_main_player = setup_data.get("__class") != "JD_SimplePhoneUiData"
+            if self._state.get("is_main_player") != self.is_main_player:
+                await self.on_state_changed({"is_main_player": self.is_main_player})
+            if setup_data.get("lobbySetup"):
+                self.current_carousel_type = "lobby"
+            elif setup_data.get("recapSetup"):
+                self.current_carousel_type = "recap"
+            else:
+                self.current_carousel_type = "main"
 
         main_carousel_rows = setup_data.get("mainCarousel", {}).get("rows", [])
         if main_carousel_rows:
@@ -311,8 +311,8 @@ class JustDanceGameV1(JustDanceGameAbstract):
 
         if cmd == Command.PAUSE:
             __class = "JD_Pause_PhoneCommandData"
-        # further commands are only for main player
-        elif not self.is_main_player:
+        # Popups can ask another player to take over navigation.
+        elif not self.is_main_player and self.current_carousel_type != "popup":
             # TODO: code repetition, need to refactor
             # non-main controller can only change coach in lobby
             if not self.is_in_lobby:
