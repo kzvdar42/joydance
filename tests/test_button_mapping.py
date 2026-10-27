@@ -168,6 +168,87 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.game.profile_data["player_id"], 2)
         self.controller.set_player_led.assert_not_awaited()
 
+    async def test_coach_only_lobby_does_not_mark_secondary_controller_as_main(self):
+        await self.game.on_message(json.dumps(menu_setup()))
+        # Captured secondary lobby: full JD_PhoneUiData with coaches, without Start.
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiSetupData", "inputSetup": {"isEnabled": 1},
+            "setupData": {"__class": "JD_PhoneUiData", "lobbySetup": {
+                "coaches": [{"selectedOnEnter": 0}, {"selectedOnEnter": 1}],
+            }},
+        }))
+        self.assertFalse(self.game.is_main_player)
+        self.assertFalse(self.game._state["is_main_player"])
+        self.assertTrue(self.game.is_input_allowed)
+        self.assertTrue(self.game.is_in_lobby)
+        self.assertEqual(await self.game.preprocess_command(Command.ACCEPT), (None, None))
+
+    async def test_disabled_lobby_start_still_identifies_main_controller(self):
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiSetupData", "inputSetup": {"isEnabled": 0},
+            "setupData": {"__class": "JD_PhoneUiData", "lobbySetup": {
+                "coaches": [{}, {}], "startButton": {"isEnabled": False},
+            }},
+        }))
+        self.assertTrue(self.game.is_main_player)
+        self.assertTrue(self.game._state["is_main_player"])
+        self.assertEqual(await self.game.preprocess_command(Command.ACCEPT), (None, None))
+        for enabled in (True, False):
+            await self.game.on_message(json.dumps({
+                "__class": "InputSetup_ConsoleCommandData", "isEnabled": enabled,
+            }))
+            await self.game.on_message(json.dumps({
+                "__class": "JD_EnableLobbyStartbutton_ConsoleCommandData", "isEnabled": enabled,
+            }))
+            self.assertTrue(self.game.is_main_player)
+
+    async def test_shared_screens_preserve_navigation_ownership(self):
+        for is_main in (False, True):
+            with self.subTest(is_main=is_main):
+                if is_main:
+                    await self.game.on_message(json.dumps(menu_setup()))
+                for setup in (
+                    {"gameplaySetup": {"pauseSlider": {"isEnabled": 1}}},
+                    {"recapSetup": {"title": "Results"}, "mainCarousel": {"rows": []}},
+                    {"recapSetup": {}, "mainCarousel": {"rows": []}},
+                    {},
+                ):
+                    await self.game.on_message(json.dumps({
+                        "__class": "JD_PhoneUiSetupData", "inputSetup": {"isEnabled": 1},
+                        "setupData": {"__class": "JD_PhoneUiData", **setup},
+                    }))
+                    self.assertEqual(self.game.is_main_player, is_main)
+                    self.assertEqual(self.game._state["is_main_player"], is_main)
+
+    async def test_popup_lobby_does_not_change_navigation_ownership(self):
+        for is_main in (False, True):
+            with self.subTest(is_main=is_main):
+                if is_main:
+                    await self.game.on_message(json.dumps(menu_setup()))
+                await self.game.on_message(json.dumps({
+                    "__class": "JD_PhoneUiSetupData", "isPopup": 1,
+                    "inputSetup": {"isEnabled": 1},
+                    "setupData": {"lobbySetup": {"coaches": [{}, {}]}},
+                }))
+                await self.game.on_message(json.dumps({"__class": "JD_ClosePopup_ConsoleCommandData"}))
+                self.assertEqual(self.game.is_main_player, is_main)
+                self.assertEqual(self.game._state["is_main_player"], is_main)
+
+    async def test_disconnect_clears_navigation_ownership_before_reconnecting(self):
+        self.controller.set_player_led = AsyncMock()
+        self.controller.set_accel_collection = Mock()
+        await self.game.on_message(json.dumps(menu_setup()))
+        self.game.is_connected = True
+        await self.game.disconnect(should_reconnect=False)
+        self.assertFalse(self.game.is_main_player)
+        self.assertFalse(self.game._state["is_main_player"])
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiSetupData", "inputSetup": {"isEnabled": 1},
+            "setupData": {"gameplaySetup": {"pauseSlider": {"isEnabled": 1}}},
+        }))
+        self.assertFalse(self.game.is_main_player)
+        self.assertFalse(self.game._state["is_main_player"])
+
     async def test_secondary_player_can_confirm_takeover_popup_then_navigate(self):
         self.controller.set_player_led = AsyncMock()
         for explicit_action in (False, True):

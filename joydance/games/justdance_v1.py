@@ -23,7 +23,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
 
     def __init__(self, controller, *args, **kwargs):
         super().__init__(controller, *args, **kwargs)
-        self.is_main_player = True
+        self.is_main_player = False
         self._carousel_setup = defaultdict(
             lambda: {
                 "row_num": 0,
@@ -36,6 +36,11 @@ class JustDanceGameV1(JustDanceGameAbstract):
         self._screen_carousel_type = "main"
         self.coach_id = 0
         self.num_coaches = 0
+
+    def _reset_input_state(self):
+        super()._reset_input_state()
+        self.is_main_player = False
+        self._state["is_main_player"] = False
 
     @property
     def current_carousel_type(self):
@@ -125,8 +130,13 @@ class JustDanceGameV1(JustDanceGameAbstract):
         setup_data = data.get("setupData", {})
         is_popup = bool(data.get("isPopup"))
         if not is_popup:
-            # Navigation ownership follows the supplied UI, not the player's scoring slot.
-            self.is_main_player = setup_data.get("__class") != "JD_SimplePhoneUiData"
+            # Shared gameplay/recap screens do not establish navigation ownership.
+            if setup_data.get("__class") == "JD_SimplePhoneUiData":
+                self.is_main_player = False
+            elif setup_data.get("lobbySetup"):
+                self.is_main_player = self._has_lobby_start_button
+            elif setup_data.get("mainCarousel") and "recapSetup" not in setup_data:
+                self.is_main_player = True
             if setup_data.get("lobbySetup"):
                 self._screen_carousel_type = "lobby"
             elif setup_data.get("recapSetup"):

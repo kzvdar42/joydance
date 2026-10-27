@@ -401,9 +401,12 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
                 controller.set_player_led.assert_awaited_once_with(0, flash=True)
                 self.assertTrue(close_finished.is_set())
+                expected_state = {"state": PairingState.DISCONNECTED.value, "connection_requested": True}
+                if game_class is JustDanceGameV1:
+                    expected_state["is_main_player"] = False
                 on_state_changed.assert_awaited_once_with(
                     controller.serial,
-                    {"state": PairingState.DISCONNECTED.value, "connection_requested": True},
+                    expected_state,
                 )
                 self.assertIsNone(game.ws)
                 self.assertFalse(game.is_connected)
