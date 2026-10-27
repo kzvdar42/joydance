@@ -79,6 +79,13 @@ def lobby_setup(selected_coach, coach_ids=(0, 1, 2)):
     }
 
 
+def input_collection(commands):
+    return {
+        "__class": "JD_InputCollectionPhoneData",
+        "availableInput": {key: json.dumps({"root": command}) for key, command in commands.items()},
+    }
+
+
 class ButtonMappingTests(unittest.TestCase):
     def test_basic_commands_work_without_screen_shortcuts(self):
         controller = controller_with_buttons()
@@ -590,6 +597,154 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def message(self, game, name, **data):
         await game.on_message(json.dumps({"__class": name, **data}))
+
+    async def test_v2_uses_server_provided_direction_and_confirm_commands(self):
+        game = self.make_game(JustDanceGameV2)
+        await game.on_message(json.dumps(menu_setup()))
+        mappings = (
+            ("UP", Command.UP, {"__class": "JD_Input_PhoneCommandData", "input": 101}),
+            ("RIGHT", Command.RIGHT, {"__class": "JD_Input_PhoneCommandData", "input": 102}),
+            ("DOWN", Command.DOWN, {"__class": "JD_Input_PhoneCommandData", "input": 103}),
+            ("LEFT", Command.LEFT, {"__class": "JD_Input_PhoneCommandData", "input": 104}),
+            ("VALID", Command.ACCEPT, {
+                "__class": "JD_Custom_PhoneCommandData", "identifier": "CONFIRM", "extra": {"value": 7},
+            }),
+        )
+        await game.on_message(json.dumps(input_collection({name: data for name, _, data in mappings})))
+        for name, cmd, data in mappings:
+            with self.subTest(input=name):
+                expected = (data["__class"], {key: value for key, value in data.items() if key != "__class"})
+                self.assertTrue(game.is_command_allowed(cmd))
+                self.assertEqual(await game.preprocess_command(cmd), expected)
+                self.assertEqual(await game.preprocess_command(cmd), expected)
+
+    async def test_v2_mapping_replacement_does_not_reuse_missing_commands(self):
+        game = self.make_game(JustDanceGameV2)
+        await game.on_message(json.dumps(menu_setup()))
+        valid = {"__class": "JD_Input_PhoneCommandData", "input": 185785632}
+        await game.on_message(json.dumps(input_collection({"VALID": valid})))
+        await game.on_message(json.dumps(input_collection({"RIGHT": valid})))
+        self.assertFalse(game.is_command_allowed(Command.ACCEPT))
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (None, None))
+        self.assertEqual(await game.preprocess_command(Command.RIGHT), (
+            "JD_Input_PhoneCommandData", {"input": 185785632},
+        ))
+        await game.on_message(json.dumps(input_collection({})))
+        for cmd in (Command.UP, Command.RIGHT, Command.DOWN, Command.LEFT, Command.ACCEPT):
+            self.assertFalse(game.is_command_allowed(cmd))
+            self.assertEqual(await game.preprocess_command(cmd), (None, None))
+
+    async def test_v2_invalid_mappings_are_ignored_without_falling_back(self):
+        for encoded in (
+            None, "", 1, {}, "not json", "null", "[]", "{}",
+            '{"root": []}', '{"root": {"input": 1}}', '{"root": {"__class": 1}}',
+            '{"root": {"__class": ""}}',
+        ):
+            with self.subTest(encoded=encoded):
+                game = self.make_game(JustDanceGameV2)
+                await game.on_message(json.dumps(menu_setup()))
+                initial = input_collection({"VALID": {"__class": "JD_Input_PhoneCommandData", "input": 7}})
+                await game.on_message(json.dumps(initial))
+                replacement = input_collection({"RIGHT": {"__class": "JD_Input_PhoneCommandData", "input": 9}})
+                replacement["availableInput"]["VALID"] = encoded
+                with patch("joydance.games.justdance_v2.logger"):
+                    await game.on_message(json.dumps(replacement))
+                self.assertEqual(await game.preprocess_command(Command.ACCEPT), (None, None))
+                self.assertEqual(await game.preprocess_command(Command.RIGHT), (
+                    "JD_Input_PhoneCommandData", {"input": 9},
+                ))
+        for invalid_table in (None, [], "invalid"):
+            with self.subTest(available_input=invalid_table):
+                with patch("joydance.games.justdance_v2.logger"):
+                    await self.message(game, "JD_InputCollectionPhoneData", availableInput=invalid_table)
+                self.assertEqual(await game.preprocess_command(Command.RIGHT), (None, None))
+
+    async def test_v2_mapping_updates_do_not_enable_input_or_change_shortcuts_and_pause(self):
+        game = self.make_game(JustDanceGameV2)
+        await game.on_message(json.dumps(menu_setup()))
+        await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=False)
+        await game.on_message(json.dumps(input_collection({
+            "VALID": {"__class": "JD_Input_PhoneCommandData", "input": 185785632},
+        })))
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (None, None))
+        await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=True)
+        await self.message(game, "JD_PhoneUiShortcutData", shortcuts=[{
+            "__class": "JD_PhoneAction_Shortcut", "shortcutType": Command.UPLOAD.value,
+        }])
+        self.assertEqual(await game.preprocess_command(Command.UPLOAD), (
+            "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value},
+        ))
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (
+            "JD_Input_PhoneCommandData", {"input": 185785632},
+        ))
+        game.should_start_accelerometer = True
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (None, None))
+        self.assertEqual(await game.preprocess_command(Command.PAUSE), ("JD_Pause_PhoneCommandData", {}))
+
+    async def test_v2_input_mappings_are_independent_for_each_connection_and_leave_v1_unchanged(self):
+        first, second = self.make_game(JustDanceGameV2), self.make_game(JustDanceGameV2)
+        legacy = self.make_game(JustDanceGameV1)
+        for game, value in ((first, 7), (second, 9), (legacy, 11)):
+            await game.on_message(json.dumps(menu_setup()))
+            await game.on_message(json.dumps(input_collection({
+                "VALID": {"__class": "JD_Input_PhoneCommandData", "input": value},
+            })))
+        self.assertEqual(await first.preprocess_command(Command.ACCEPT), ("JD_Input_PhoneCommandData", {"input": 7}))
+        self.assertEqual(await second.preprocess_command(Command.ACCEPT), ("JD_Input_PhoneCommandData", {"input": 9}))
+        self.assertEqual(await legacy.preprocess_command(Command.ACCEPT), (
+            "ValidateAction_PhoneCommandData", {"rowIndex": 0, "itemIndex": 0, "actionIndex": 0},
+        ))
+
+    async def test_v2_mappings_survive_screen_and_popup_changes_but_reset_on_disconnect(self):
+        game = self.make_game(JustDanceGameV2)
+        await game.on_message(json.dumps(input_collection({
+            "VALID": {"__class": "JD_Input_PhoneCommandData", "input": 185785632},
+        })))
+        for is_popup in (False, True):
+            setup = menu_setup()
+            setup["isPopup"] = is_popup
+            await game.on_message(json.dumps(setup))
+            self.assertEqual(await game.preprocess_command(Command.ACCEPT), (
+                "JD_Input_PhoneCommandData", {"input": 185785632},
+            ))
+        await self.message(game, "JD_ClosePopup_ConsoleCommandData")
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (
+            "JD_Input_PhoneCommandData", {"input": 185785632},
+        ))
+        game.controller.set_accel_collection = Mock()
+        game.controller.set_player_led = AsyncMock()
+        await game.disconnect(should_reconnect=False)
+        await game.on_message(json.dumps(menu_setup()))
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (
+            "JD_Input_PhoneCommandData", {"input": Command.ACCEPT.value},
+        ))
+
+    async def test_v2_mapping_update_discards_presses_for_the_previous_mapping(self):
+        game = self.make_game(JustDanceGameV2)
+        await game.on_message(json.dumps(menu_setup()))
+        game.controller.joycon.joycon_button_event("a", 1)
+        await game.on_message(json.dumps(input_collection({
+            "VALID": {"__class": "JD_Input_PhoneCommandData", "input": 185785632},
+        })))
+        self.assertEqual(game.controller.joycon._events_buffer, [])
+
+    async def test_v2_button_press_sends_the_supplied_command_on_the_socket(self):
+        game = self.make_game(JustDanceGameV2)
+        await game.on_message(json.dumps(menu_setup()))
+        command = {"__class": "JD_Input_PhoneCommandData", "input": 185785632}
+        await game.on_message(json.dumps(input_collection({"VALID": command})))
+        sent = asyncio.Event()
+        game.ws = SimpleNamespace(state=State.OPEN, send=AsyncMock(side_effect=lambda *args: sent.set()))
+        game.is_connected = True
+        game.controller.joycon.joycon_button_event("a", 1)
+        task = asyncio.create_task(game.send_command())
+        try:
+            await asyncio.wait_for(sent.wait(), 1)
+            game.ws.send.assert_awaited_once()
+            self.assertEqual(json.loads(game.ws.send.await_args.args[0]), {"root": command})
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def test_initial_carousel_permission_can_be_updated_independently(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):

@@ -1,4 +1,5 @@
 import logging
+import json
 from urllib.parse import urlparse
 import ssl
 from websockets.asyncio.client import connect
@@ -9,6 +10,7 @@ from joydance.constants import (
     PairingState,
     WS_SUBPROTOCOLS,
     WsSubprotocolVersion,
+    V2_INPUT_MAPPING_KEYS,
 )
 from .justdance_abstract import JustDanceGameAbstract
 
@@ -24,6 +26,51 @@ class JustDanceGameV2(JustDanceGameAbstract):
 
     def __init__(self, controller, *args, **kwargs):
         super().__init__(controller, *args, **kwargs)
+        # Keep legacy commands until the server supplies its own mapping table.
+        self._input_commands = None
+
+    def _reset_input_state(self):
+        super()._reset_input_state()
+        self._input_commands = None
+
+    def is_command_allowed(self, cmd):
+        if not super().is_command_allowed(cmd):
+            return False
+        if self._input_commands is not None and cmd in V2_INPUT_MAPPING_KEYS:
+            return cmd in self._input_commands
+        return True
+
+    async def on_message(self, message_str):
+        message = json.loads(message_str)
+        if message.get("__class") == "JD_InputCollectionPhoneData":
+            self._parse_input_collection(message)
+        await super().on_message(message_str)
+
+    def _parse_input_collection(self, message):
+        # Discard queued presses so they cannot trigger newly assigned commands.
+        self.controller.get_latest_command(commands_to_check=set())
+        # The app replaces this connection-wide table independently of screen setup.
+        self._input_commands = {}
+        available_input = message.get("availableInput", {})
+        if not isinstance(available_input, dict):
+            logger.warning("%s: Invalid availableInput mapping table", self.controller.serial)
+            available_input = {}
+        for cmd, key in V2_INPUT_MAPPING_KEYS.items():
+            encoded = available_input.get(key)
+            if encoded is None or encoded == "":
+                continue
+            try:
+                command = json.loads(encoded)["root"]
+                if (
+                    not isinstance(command, dict)
+                    or not isinstance(command.get("__class"), str)
+                    or not command["__class"]
+                ):
+                    raise ValueError("Expected a command object with a class name")
+            except (KeyError, TypeError, ValueError):
+                logger.warning("%s: Invalid input mapping for %s", self.controller.serial, key)
+                continue
+            self._input_commands[cmd] = command
 
     async def connect_ws(self):
         server_hostname = None
@@ -165,6 +212,9 @@ class JustDanceGameV2(JustDanceGameAbstract):
     async def preprocess_command(self, cmd):
         if not self.is_command_allowed(cmd):
             return None, None
+        if self._input_commands is not None and cmd in V2_INPUT_MAPPING_KEYS:
+            data = self._input_commands[cmd].copy()
+            return data.pop("__class"), data
         data = {}
         if cmd == Command.PAUSE:
             __class = "JD_Pause_PhoneCommandData"

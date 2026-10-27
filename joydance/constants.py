@@ -107,6 +107,15 @@ class Command(Enum):
     UPLOAD = "SHORTCUT_UPLOAD"
 
 
+V2_INPUT_MAPPING_KEYS = {
+    Command.UP: "UP",
+    Command.RIGHT: "RIGHT",
+    Command.DOWN: "DOWN",
+    Command.LEFT: "LEFT",
+    Command.ACCEPT: "VALID",
+}
+
+
 class JoyConButton(Enum):
     # Joy-Con (L)
     UP = "up"
