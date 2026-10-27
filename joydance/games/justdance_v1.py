@@ -30,6 +30,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 "col_num_per_row_id": defaultdict(int),
                 "num_columns_per_row_id": {},
                 "item_actions": {},
+                "disabled_items": set(),
                 "action_id": 0,
             }
         )
@@ -91,6 +92,14 @@ class JustDanceGameV1(JustDanceGameAbstract):
     def action_id(self, value):
         self._carousel_setup[self.current_carousel_type]["action_id"] = value
 
+    def is_command_allowed(self, cmd):
+        if not super().is_command_allowed(cmd):
+            return False
+        if cmd == Command.ACCEPT and not self.is_in_lobby:
+            position = (self.row_num, self.col_num_per_row_id[self.row_num])
+            return position not in self.carousel_setup["disabled_items"]
+        return True
+
     async def on_message(self, message_str):
         message_dict = json.loads(message_str)
         __class = message_dict.get("__class")
@@ -145,6 +154,8 @@ class JustDanceGameV1(JustDanceGameAbstract):
             else:
                 self._screen_carousel_type = "main"
 
+        disabled_items = set()
+        self.carousel_setup["disabled_items"] = disabled_items
         main_carousel_rows = setup_data.get("mainCarousel", {}).get("rows", [])
         if main_carousel_rows:
             num_columns_per_row_id = {}
@@ -153,6 +164,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 num_columns_per_row_id[row_num] = len(row["items"])
                 for item_idx, item in enumerate(row.get("items", [])):
                     all_item_actions[row_num][item_idx] = self.parse_actions(item.get("actions", []))
+                    # Default missing isEnabled to false
+                    if not item.get("isEnabled", False):
+                        disabled_items.add((row_num, item_idx))
             self.item_actions = all_item_actions
             self.num_columns_per_row_id = num_columns_per_row_id
 

@@ -527,7 +527,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             enabled=(
                 bool(message.get("inputSetup", {}).get("isEnabled"))
                 and setup_data.get("__class") != "JD_SimplePhoneUiData"
-            )
+            ),
+            carousel_enabled=bool(setup_data.get("mainCarousel", {}).get("isEnabled", True)),
         )
         if setup_data.get("gameplaySetup", {}).get("pauseSlider", {}):
             state.shortcuts.add(Command.PAUSE)

@@ -40,11 +40,11 @@ def menu_setup(shortcuts=()):
                 "rows": [
                     {
                         "items": [
-                            {"actions": [{"command": ""} for _ in range(3)]},
-                            {"actions": [{"command": ""}]},
+                            {"isEnabled": True, "actions": [{"command": ""} for _ in range(3)]},
+                            {"isEnabled": True, "actions": [{"command": ""}]},
                         ]
                     },
-                    {"items": [{"actions": [{"command": ""}]}]},
+                    {"items": [{"isEnabled": True, "actions": [{"command": ""}]}]},
                 ]
             },
             "shortcuts": [
@@ -590,6 +590,109 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def message(self, game, name, **data):
         await game.on_message(json.dumps({"__class": name, **data}))
+
+    async def test_initial_carousel_permission_can_be_updated_independently(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            for enabled in (None, False, True):
+                with self.subTest(protocol=game_class.__name__, enabled=enabled):
+                    game = self.make_game(game_class)
+                    setup = menu_setup()
+                    if enabled is not None:
+                        setup["setupData"]["mainCarousel"]["isEnabled"] = enabled
+                    await game.on_message(json.dumps(setup))
+                    await self.message(game, "JD_PhoneUiShortcutData", shortcuts=[{
+                        "__class": "JD_PhoneAction_Shortcut", "shortcutType": Command.UPLOAD.value,
+                    }])
+                    await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=True)
+                    self.assertEqual(game.is_input_allowed, enabled is not False)
+                    self.assertEqual(game.is_command_allowed(Command.ACCEPT), enabled is not False)
+                    self.assertTrue(game.is_command_allowed(Command.UPLOAD))
+                    if enabled is False:
+                        for cmd in (Command.ACCEPT, Command.RIGHT):
+                            self.assertEqual(await game.preprocess_command(cmd), (None, None))
+                    await self.message(game, "EnableCarousel_ConsoleCommandData", isEnabled=True)
+                    self.assertTrue(game.is_command_allowed(Command.ACCEPT))
+
+    async def test_disabled_or_unspecified_item_permission_blocks_validation(self):
+        action = {"__class": "JD_Custom_PhoneCommandData", "identifier": "SELECT_ITEM"}
+        for enabled in (None, False, True):
+            for explicit_action in (False, True):
+                with self.subTest(enabled=enabled, explicit_action=explicit_action):
+                    game = self.make_game(JustDanceGameV1)
+                    setup = menu_setup()
+                    item = setup["setupData"]["mainCarousel"]["rows"][0]["items"][0]
+                    item.pop("isEnabled")
+                    if enabled is not None:
+                        item["isEnabled"] = enabled
+                    if explicit_action:
+                        item["actions"] = [{"command": json.dumps({"root": action})}]
+                    await game.on_message(json.dumps(setup))
+                    self.assertEqual(game.is_command_allowed(Command.ACCEPT), enabled is True)
+                    expected = (None, None)
+                    if enabled:
+                        expected = (action["__class"], {"identifier": "SELECT_ITEM"}) if explicit_action else (
+                            "ValidateAction_PhoneCommandData", {"rowIndex": 0, "itemIndex": 0, "actionIndex": 0},
+                        )
+                    self.assertEqual(await game.preprocess_command(Command.ACCEPT), expected)
+
+    async def test_item_permissions_follow_the_selected_row_and_column(self):
+        game = self.make_game(JustDanceGameV1)
+        setup = menu_setup()
+        setup["setupData"]["mainCarousel"]["rows"][0]["items"][0]["isEnabled"] = False
+        setup["setupData"]["mainCarousel"]["rows"][1]["items"][0]["isEnabled"] = False
+        await game.on_message(json.dumps(setup))
+        for direction, expected_allowed in (
+            (Command.RIGHT, True), (Command.LEFT, False), (Command.DOWN, False),
+        ):
+            self.assertIsNotNone((await game.preprocess_command(direction))[0])
+            self.assertEqual(game.is_command_allowed(Command.ACCEPT), expected_allowed)
+        await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=True,
+                           carouselPosSetup={"rowIndex": 0, "itemIndex": 1, "actionIndex": 0})
+        self.assertTrue(game.is_command_allowed(Command.ACCEPT))
+
+    async def test_popup_and_replacement_setup_keep_item_permissions_scoped(self):
+        for main_enabled in (False, True):
+            with self.subTest(main_enabled=main_enabled):
+                game = self.make_game(JustDanceGameV1)
+                setup = menu_setup()
+                setup["setupData"]["mainCarousel"]["rows"][0]["items"][0]["isEnabled"] = main_enabled
+                await game.on_message(json.dumps(setup))
+                popup = menu_setup()
+                popup["isPopup"] = True
+                popup["setupData"]["mainCarousel"]["rows"][0]["items"][0]["isEnabled"] = not main_enabled
+                await game.on_message(json.dumps(popup))
+                self.assertEqual(game.is_command_allowed(Command.ACCEPT), not main_enabled)
+                await self.message(game, "JD_ClosePopup_ConsoleCommandData")
+                self.assertEqual(game.is_command_allowed(Command.ACCEPT), main_enabled)
+                await game.on_message(json.dumps(menu_setup()))
+                self.assertTrue(game.is_command_allowed(Command.ACCEPT))
+
+    async def test_locked_enabled_item_can_still_send_its_supplied_action(self):
+        game = self.make_game(JustDanceGameV1)
+        setup = menu_setup()
+        item = setup["setupData"]["mainCarousel"]["rows"][0]["items"][0]
+        item["isLocked"] = 1
+        item["actions"] = [{"command": json.dumps({"root": {
+            "__class": "JD_Custom_PhoneCommandData", "identifier": "OPEN_OFFER",
+        }})}]
+        await game.on_message(json.dumps(setup))
+        self.assertEqual(await game.preprocess_command(Command.ACCEPT), (
+            "JD_Custom_PhoneCommandData", {"identifier": "OPEN_OFFER"},
+        ))
+
+    async def test_disabled_item_confirmation_is_discarded_before_moving_to_enabled_item(self):
+        game = self.make_game(JustDanceGameV1)
+        setup = menu_setup()
+        setup["setupData"]["mainCarousel"]["rows"][0]["items"][0]["isEnabled"] = False
+        await game.on_message(json.dumps(setup))
+        sent_times = await self.run_input_frames(game, [
+            (0, "a", None), (0.05, None, Command.RIGHT), (0.1, None, None), (0.15, "a", None),
+        ])
+        self.assertEqual(sent_times, [0.05, 0.15])
+        self.assertEqual([call.args for call in game.send_message.await_args_list], [
+            ("ChangeItem_PhoneCommandData", {"rowIndex": 0, "itemIndex": 1}),
+            ("ValidateAction_PhoneCommandData", {"rowIndex": 0, "itemIndex": 1, "actionIndex": 0}),
+        ])
 
     async def test_navigation_and_shortcut_permissions_are_independent(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):

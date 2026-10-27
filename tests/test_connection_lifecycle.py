@@ -177,7 +177,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     "inputSetup": {"isEnabled": 1},
                     "setupData": {
                         "mainCarousel": {
-                            "rows": [{"items": [{"actions": [{"command": ""}]}]}]
+                            "rows": [{"items": [{"isEnabled": True, "actions": [{"command": ""}]}]}]
                         }
                     },
                 }
