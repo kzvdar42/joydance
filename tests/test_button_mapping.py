@@ -64,6 +64,21 @@ def menu_setup(shortcuts=()):
     }
 
 
+def lobby_setup(selected_coach, coach_ids=(0, 1, 2)):
+    return {
+        "__class": "JD_PhoneUiSetupData",
+        "inputSetup": {"isEnabled": 1},
+        "setupData": {"__class": "JD_PhoneUiData", "lobbySetup": {
+            "coaches": [
+                {"selectedOnEnter": index == selected_coach, "actions": [{"command": json.dumps({
+                    "root": {"__class": "JD_ChangeCoach_PhoneCommandData", "coachId": coach_id},
+                })}]}
+                for index, coach_id in enumerate(coach_ids)
+            ],
+        }},
+    }
+
+
 class ButtonMappingTests(unittest.TestCase):
     def test_basic_commands_work_without_screen_shortcuts(self):
         controller = controller_with_buttons()
@@ -395,15 +410,13 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.game.preprocess_command(command), (None, None))
 
     async def test_non_main_player_lobby_uses_coach_and_start_permissions(self):
-        await self.game.on_message(json.dumps({
-            "__class": "JD_PhoneUiSetupData", "inputSetup": {"isEnabled": True},
-            "setupData": {"lobbySetup": {
-                "coaches": [{}, {}],
-                "startButton": {"isEnabled": False, "actions": [{"command": json.dumps({
-                    "root": {"__class": "JD_StartGame_PhoneCommandData"},
-                })}]},
-            }},
-        }))
+        setup = lobby_setup(selected_coach=0, coach_ids=(0, 1))
+        setup["setupData"]["lobbySetup"]["startButton"] = {
+            "isEnabled": False, "actions": [{"command": json.dumps({
+                "root": {"__class": "JD_StartGame_PhoneCommandData"},
+            })}],
+        }
+        await self.game.on_message(json.dumps(setup))
         self.game.is_main_player = False
         for direction, coach_id in ((Command.RIGHT, 1), (Command.LEFT, 0)):
             self.assertEqual(await self.game.preprocess_command(direction), (
@@ -415,6 +428,75 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
         }))
         self.assertEqual(await self.game.preprocess_command(Command.ACCEPT), (
             "JD_StartGame_PhoneCommandData", {},
+        ))
+
+    async def test_lobby_uses_game_selected_coach_and_respects_boundaries(self):
+        self.game.send_message = AsyncMock()
+        for with_start in (False, True):
+            with self.subTest(with_start=with_start):
+                setup = lobby_setup(selected_coach=1)
+                setup["inputSetup"]["carouselPosSetup"] = {
+                    "rowIndex": 0, "itemIndex": 0, "actionIndex": 0,
+                }
+                if with_start:
+                    setup["setupData"]["lobbySetup"]["startButton"] = {"isEnabled": False}
+                await self.game.on_message(json.dumps(setup))
+                self.assertEqual(self.game.coach_id, 1)
+                self.game.send_message.assert_not_awaited()
+                for direction, coach_id in (
+                    (Command.LEFT, 0), (Command.LEFT, None), (Command.RIGHT, 1),
+                    (Command.RIGHT, 2), (Command.RIGHT, None),
+                ):
+                    expected = (None, None) if coach_id is None else (
+                        "JD_ChangeCoach_PhoneCommandData", {"coachId": coach_id},
+                    )
+                    self.assertEqual(await self.game.preprocess_command(direction), expected)
+
+    async def test_coach_selection_uses_supplied_actions_without_mutating_them(self):
+        await self.game.on_message(json.dumps(lobby_setup(selected_coach=1, coach_ids=(7, 3, 9))))
+        for direction, coach_id in (
+            (Command.RIGHT, 9), (Command.LEFT, 3), (Command.LEFT, 7), (Command.RIGHT, 3),
+        ):
+            self.assertEqual(await self.game.preprocess_command(direction), (
+                "JD_ChangeCoach_PhoneCommandData", {"coachId": coach_id},
+            ))
+
+    async def test_coach_without_an_action_sends_no_command(self):
+        for coach in ({}, {"actions": []}, {"actions": [{}]}, {"actions": [{"command": ""}]}):
+            with self.subTest(coach=coach):
+                setup = lobby_setup(selected_coach=0)
+                setup["setupData"]["lobbySetup"]["coaches"][1] = coach
+                await self.game.on_message(json.dumps(setup))
+                for direction, coach_id in (
+                    (Command.RIGHT, None), (Command.RIGHT, 2),
+                    (Command.LEFT, None), (Command.LEFT, 0),
+                ):
+                    expected = (None, None) if coach_id is None else (
+                        "JD_ChangeCoach_PhoneCommandData", {"coachId": coach_id},
+                    )
+                    self.assertEqual(await self.game.preprocess_command(direction), expected)
+                    self.assertEqual(self.game.coach_id, 1 if coach_id is None else coach_id)
+
+    async def test_new_lobby_replaces_coach_selection_without_carousel_position(self):
+        for selected in (2, 1, None):
+            with self.subTest(selected=selected):
+                await self.game.on_message(json.dumps(lobby_setup(selected_coach=selected)))
+                self.assertEqual(self.game.coach_id, selected if selected is not None else 0)
+        await self.game.on_message(json.dumps(lobby_setup(selected_coach=None, coach_ids=())))
+        self.assertEqual(self.game.coach_id, 0)
+        for direction in (Command.LEFT, Command.RIGHT):
+            self.assertEqual(await self.game.preprocess_command(direction), (None, None))
+            self.assertEqual(self.game.coach_id, 0)
+
+    async def test_popup_preserves_game_selected_coach_and_actions(self):
+        await self.game.on_message(json.dumps(lobby_setup(selected_coach=1, coach_ids=(7, 3, 9))))
+        for popup in (menu_setup(), lobby_setup(selected_coach=0, coach_ids=(10,))):
+            popup["isPopup"] = True
+            await self.game.on_message(json.dumps(popup))
+        await self.game.on_message(json.dumps({"__class": "JD_ClosePopup_ConsoleCommandData"}))
+        self.assertEqual(self.game.coach_id, 1)
+        self.assertEqual(await self.game.preprocess_command(Command.RIGHT), (
+            "JD_ChangeCoach_PhoneCommandData", {"coachId": 9},
         ))
 
     async def test_new_screens_clear_shortcuts_in_both_protocols(self):
@@ -609,10 +691,9 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_popup_replacement_keeps_lobby_coach_and_start_context(self):
         game = self.make_game(JustDanceGameV1)
-        await self.message(game, "JD_PhoneUiSetupData", inputSetup={"isEnabled": True}, setupData={
-            "lobbySetup": {"coaches": [{}, {}, {}], "startButton": {"isEnabled": False}},
-        })
-        game.coach_id = 1
+        setup = lobby_setup(selected_coach=1)
+        setup["setupData"]["lobbySetup"]["startButton"] = {"isEnabled": False}
+        await game.on_message(json.dumps(setup))
         for _ in range(2):
             popup = menu_setup()
             popup["isPopup"] = True

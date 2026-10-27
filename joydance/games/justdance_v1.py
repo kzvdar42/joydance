@@ -36,6 +36,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
         self._screen_carousel_type = "main"
         self.coach_id = 0
         self.num_coaches = 0
+        self._coach_actions = []
 
     def _reset_input_state(self):
         super()._reset_input_state()
@@ -160,8 +161,6 @@ class JustDanceGameV1(JustDanceGameAbstract):
             self.row_num = carousel_pos_setup["rowIndex"]
             self.col_num_per_row_id[self.row_num] = carousel_pos_setup["itemIndex"]
             self.action_id = carousel_pos_setup["actionIndex"]
-            if not is_popup:
-                self.coach_id = 0
 
         lobby_setup = setup_data.get("lobbySetup", {})
         if lobby_setup:
@@ -169,7 +168,13 @@ class JustDanceGameV1(JustDanceGameAbstract):
             self.item_actions = {
                 0: {0: self.parse_actions(lobby_setup.get("startButton", {}).get("actions", []))}
             }
-            self.num_coaches = len(lobby_setup.get("coaches", []))
+            if not is_popup:
+                coaches = lobby_setup.get("coaches", [])
+                self.num_coaches = len(coaches)
+                self.coach_id = next(
+                    (index for index, coach in enumerate(coaches) if coach.get("selectedOnEnter")), 0
+                )
+                self._coach_actions = [self.parse_actions(coach.get("actions", [])) for coach in coaches]
 
         shortcuts_data = setup_data.get("shortcuts") or []
         logger.debug("V1 shortcuts_data: %s", shortcuts_data)
@@ -381,38 +386,32 @@ class JustDanceGameV1(JustDanceGameAbstract):
             if self.row_num >= len(self.num_columns_per_row_id):
                 self.row_num = 0
             data["rowIndex"] = self.row_num
+        elif cmd in (Command.LEFT, Command.RIGHT) and self.is_in_lobby:
+            coach_id = self.coach_id + (-1 if cmd == Command.LEFT else 1)
+            if not 0 <= coach_id < self.num_coaches:
+                return None, None
+            self.coach_id = coach_id
+            actions = self._coach_actions[coach_id]
+            if actions and isinstance(actions[0], dict):
+                data = actions[0].copy()
+                return data.pop("__class", None), data
+            if actions and isinstance(actions[0], str) and actions[0]:
+                return None, actions[0]
+            return None, None
         elif cmd == Command.LEFT:
-            if not self.is_in_lobby:
-                self.action_id = 0
-                __class = "ChangeItem_PhoneCommandData"
-                data["rowIndex"] = self.row_num
-                self.col_num_per_row_id[self.row_num] -= 1
-                if self.col_num_per_row_id[self.row_num] < 0:
-                    self.col_num_per_row_id[self.row_num] = self.num_columns_per_row_id[self.row_num] - 1
-                data["itemIndex"] = self.col_num_per_row_id[self.row_num]
-            else:
-                __class = "JD_ChangeCoach_PhoneCommandData"
-                if self.coach_id == 0:
-                    return None, None
-                elif self.coach_id < 0:
-                    self.coach_id = 0
-                    return None, None
-                self.coach_id -= 1
-                data["coachId"] = self.coach_id
+            self.action_id = 0
+            __class = "ChangeItem_PhoneCommandData"
+            data["rowIndex"] = self.row_num
+            self.col_num_per_row_id[self.row_num] -= 1
+            if self.col_num_per_row_id[self.row_num] < 0:
+                self.col_num_per_row_id[self.row_num] = self.num_columns_per_row_id[self.row_num] - 1
+            data["itemIndex"] = self.col_num_per_row_id[self.row_num]
         elif cmd == Command.RIGHT:
-            if not self.is_in_lobby:
-                self.action_id = 0
-                __class = "ChangeItem_PhoneCommandData"
-                data["rowIndex"] = self.row_num
-                self.col_num_per_row_id[self.row_num] += 1
-                if self.col_num_per_row_id[self.row_num] >= self.num_columns_per_row_id[self.row_num]:
-                    self.col_num_per_row_id[self.row_num] = 0
-                data["itemIndex"] = self.col_num_per_row_id[self.row_num]
-            else:
-                __class = "JD_ChangeCoach_PhoneCommandData"
-                if self.coach_id >= self.num_coaches - 1:
-                    self.coach_id = self.num_coaches - 1
-                    return None, None
-                self.coach_id += 1
-                data["coachId"] = self.coach_id
+            self.action_id = 0
+            __class = "ChangeItem_PhoneCommandData"
+            data["rowIndex"] = self.row_num
+            self.col_num_per_row_id[self.row_num] += 1
+            if self.col_num_per_row_id[self.row_num] >= self.num_columns_per_row_id[self.row_num]:
+                self.col_num_per_row_id[self.row_num] = 0
+            data["itemIndex"] = self.col_num_per_row_id[self.row_num]
         return __class, data
