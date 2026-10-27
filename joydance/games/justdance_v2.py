@@ -163,6 +163,8 @@ class JustDanceGameV2(JustDanceGameAbstract):
             logger.exception("%s: V2 An error occurred while pairing.", self.controller.serial)
 
     async def preprocess_command(self, cmd):
+        if not self.is_command_allowed(cmd):
+            return None, None
         data = {}
         if cmd == Command.PAUSE:
             __class = "JD_Pause_PhoneCommandData"

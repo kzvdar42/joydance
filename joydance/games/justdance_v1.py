@@ -9,6 +9,7 @@ from joydance.constants import (
     Command,
     PairingState,
     WsSubprotocolVersion,
+    UiLayer,
 )
 
 logger = logging.getLogger("joydance")
@@ -32,12 +33,13 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 "action_id": 0,
             }
         )
-        self.current_carousel_type = "main"
-        self._pre_pop_up_carousel_type = "main"
+        self._screen_carousel_type = "main"
         self.coach_id = 0
         self.num_coaches = 0
-        self.is_in_lobby = False
-        self.is_on_recap = False
+
+    @property
+    def current_carousel_type(self):
+        return "popup" if self._active_ui_layer is UiLayer.POPUP else self._screen_carousel_type
 
     @property
     def carousel_setup(self):
@@ -84,18 +86,11 @@ class JustDanceGameV1(JustDanceGameAbstract):
         self._carousel_setup[self.current_carousel_type]["action_id"] = value
 
     async def on_message(self, message_str):
-        # Handle general messages first
-        await super().on_message(message_str)
         message_dict = json.loads(message_str)
         __class = message_dict.get("__class")
         if __class == "InputSetup_ConsoleCommandData":
             await self.parse_carousel_position_setup_data(message_dict)
-
-        elif __class == "JD_ClosePopup_ConsoleCommandData":
-            self.current_carousel_type = self._pre_pop_up_carousel_type
-
-        elif __class == "JD_PhoneUiSetupData":
-            await self.parse_phone_setup_data(message_dict)
+        await super().on_message(message_str)
 
     async def parse_carousel_position_setup_data(self, message):
         carousel_pos_setup = None
@@ -104,9 +99,11 @@ class JustDanceGameV1(JustDanceGameAbstract):
         elif "inputSetup" in message:
             carousel_pos_setup = message["inputSetup"].get("carouselPosSetup", {})
         if carousel_pos_setup:
-            self.row_num = carousel_pos_setup["rowIndex"]
-            self.col_num_per_row_id[self.row_num] = carousel_pos_setup["itemIndex"]
-            self.action_id = carousel_pos_setup["actionIndex"]
+            carousel_type = "popup" if message.get("applyOnPopup") else self._screen_carousel_type
+            carousel_setup = self._carousel_setup[carousel_type]
+            carousel_setup["row_num"] = carousel_pos_setup["rowIndex"]
+            carousel_setup["col_num_per_row_id"][carousel_setup["row_num"]] = carousel_pos_setup["itemIndex"]
+            carousel_setup["action_id"] = carousel_pos_setup["actionIndex"]
 
     @staticmethod
     def parse_actions(raw_item_actions):
@@ -124,24 +121,18 @@ class JustDanceGameV1(JustDanceGameAbstract):
         return item_actions
 
     async def parse_phone_setup_data(self, data):
+        await super().parse_phone_setup_data(data)
         setup_data = data.get("setupData", {})
-        self.is_on_recap = False
-        self.is_in_lobby = False
-
-        if data.get("isPopup"):
-            self._pre_pop_up_carousel_type = self.current_carousel_type
-            self.current_carousel_type = "popup"
-        else:
+        is_popup = bool(data.get("isPopup"))
+        if not is_popup:
             # Navigation ownership follows the supplied UI, not the player's scoring slot.
             self.is_main_player = setup_data.get("__class") != "JD_SimplePhoneUiData"
-            if self._state.get("is_main_player") != self.is_main_player:
-                await self.on_state_changed({"is_main_player": self.is_main_player})
             if setup_data.get("lobbySetup"):
-                self.current_carousel_type = "lobby"
+                self._screen_carousel_type = "lobby"
             elif setup_data.get("recapSetup"):
-                self.current_carousel_type = "recap"
+                self._screen_carousel_type = "recap"
             else:
-                self.current_carousel_type = "main"
+                self._screen_carousel_type = "main"
 
         main_carousel_rows = setup_data.get("mainCarousel", {}).get("rows", [])
         if main_carousel_rows:
@@ -159,19 +150,16 @@ class JustDanceGameV1(JustDanceGameAbstract):
             self.row_num = carousel_pos_setup["rowIndex"]
             self.col_num_per_row_id[self.row_num] = carousel_pos_setup["itemIndex"]
             self.action_id = carousel_pos_setup["actionIndex"]
-            self.coach_id = 0
+            if not is_popup:
+                self.coach_id = 0
 
         lobby_setup = setup_data.get("lobbySetup", {})
         if lobby_setup:
-            self.is_in_lobby = True
             self.num_columns_per_row_id = {0: 1}
             self.item_actions = {
                 0: {0: self.parse_actions(lobby_setup.get("startButton", {}).get("actions", []))}
             }
             self.num_coaches = len(lobby_setup.get("coaches", []))
-
-        if setup_data.get("recapSetup", {}):
-            self.is_on_recap = True
 
         shortcuts_data = setup_data.get("shortcuts") or []
         logger.debug("V1 shortcuts_data: %s", shortcuts_data)
@@ -194,8 +182,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
         ):
             shortcuts.add(Command.NEXT_ACTION)
         self.available_shortcuts = shortcuts
-        if hasattr(self.controller, "available_shortcuts"):
-            self.controller.available_shortcuts = shortcuts.copy()
+        self._sync_controller_shortcuts()
+        if not is_popup and self._state.get("is_main_player") != self.is_main_player:
+            await self.on_state_changed({"is_main_player": self.is_main_player})
 
     async def connect_ws(self):
         if not self.pairing_url.startswith("ws://"):
@@ -307,35 +296,14 @@ class JustDanceGameV1(JustDanceGameAbstract):
             logger.exception("%s: V1 An error occurred while pairing.", self.controller.serial)
 
     async def preprocess_command(self, cmd):
+        if not self.is_command_allowed(cmd):
+            return None, None
         __class, data = None, {}
 
         if cmd == Command.PAUSE:
             __class = "JD_Pause_PhoneCommandData"
-        # Popups can ask another player to take over navigation.
-        elif not self.is_main_player and self.current_carousel_type != "popup":
-            # TODO: code repetition, need to refactor
-            # non-main controller can only change coach in lobby
-            if not self.is_in_lobby:
-                return None, None
-            if cmd == Command.LEFT:
-                __class = "JD_ChangeCoach_PhoneCommandData"
-                if self.coach_id == 0:
-                    return None, None
-                elif self.coach_id < 0:
-                    self.coach_id = 0
-                    return None, None
-                self.coach_id -= 1
-                data["coachId"] = self.coach_id
-            elif cmd == Command.RIGHT:
-                __class = "JD_ChangeCoach_PhoneCommandData"
-                if self.coach_id >= self.num_coaches - 1:
-                    self.coach_id = self.num_coaches - 1
-                    return None, None
-                self.coach_id += 1
-                data["coachId"] = self.coach_id
-            return __class, data
         elif cmd == Command.NEXT_ACTION:
-            if not self.is_input_allowed or self.is_in_lobby:
+            if self.is_in_lobby:
                 return None, None
             row_idx, col_idx = self.row_num, self.col_num_per_row_id[self.row_num]
             actions = self.item_actions.get(row_idx, {}).get(col_idx, [])
@@ -385,23 +353,6 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 data["rowIndex"] = row_idx
                 data["itemIndex"] = col_idx
                 data["actionIndex"] = action_idx
-            # TODO: delete after testing updated logic
-            # if self.is_in_lobby:
-            #     __class = 'JD_StartGame_PhoneCommandData'
-            # elif self.is_on_recap:
-            #     __class = 'JD_Input_PhoneCommandData'
-            #     data['input'] = Command.ACCEPT.value
-            # elif self.is_search_opened:
-            #     __class = 'JD_Input_PhoneCommandData'
-            #     data['input'] = Command.V1_KEYBOARD_ERROR_OK.value
-            # else:
-            #     __class = 'ValidateAction_PhoneCommandData'
-            #     data['rowIndex'] = self.row_num
-            #     data['itemIndex'] = self.col_num_per_row_id[self.row_num]
-            #     data['actionIndex'] = self.action_id
-        # further commands are enabled only then is_input_allowed=True
-        elif not self.is_input_allowed:
-            return None, None
         elif cmd == Command.UP:
             if self.is_in_lobby:
                 return None, None

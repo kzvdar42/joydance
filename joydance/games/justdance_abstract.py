@@ -4,6 +4,7 @@ import aiohttp
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 import time
 from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
@@ -16,9 +17,18 @@ from joydance.constants import (
     UBI_SKU_ID,
     PairingState,
     Command,
+    UiLayer,
 )
 
 logger = logging.getLogger("joydance")
+
+
+@dataclass
+class UiInputState:
+    enabled: bool = False
+    carousel_enabled: bool = True
+    shortcuts: set[Command] = field(default_factory=set)
+    search_opened: bool = False
 
 
 class JustDanceGameAbstract(AbstractGameWrapper, ABC):
@@ -56,9 +66,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.number_of_accels_sent = 0
         self._scoring_session_id = 0
         self.should_start_accelerometer = False
-        self.is_input_allowed = False
+        self._reset_input_state()
         self.profile_data = {}
-        self.available_shortcuts = set()
         self.accel_data = []
         self.ws = None
         self.is_connected = False
@@ -67,13 +76,78 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "X-SkuId": UBI_SKU_ID,
         }
         self.console_conn = None
-        self.is_search_opened = False
         self.reconnection_task = None
         self.pair_task = None
         self._rumble_task = None
         self._connecting_led_task = None
         self.should_reconnect = True
         self.requires_punch_pairing = False
+
+    def _reset_input_state(self):
+        self._active_ui_layer = UiLayer.MAIN
+        # Keep the underlying screen's controls intact while a popup has focus.
+        self._input_states = {layer: UiInputState() for layer in UiLayer}
+        self.is_shortcuts_allowed = True
+        self.is_lobby_start_allowed = False
+        self._has_lobby_start_button = False
+        self._lobby_open = False
+
+    @property
+    def is_input_allowed(self):
+        state = self._input_states[self._active_ui_layer]
+        return state.enabled and state.carousel_enabled
+
+    @is_input_allowed.setter
+    def is_input_allowed(self, enabled):
+        self._input_states[self._active_ui_layer].enabled = enabled
+
+    @property
+    def available_shortcuts(self):
+        return self._input_states[self._active_ui_layer].shortcuts
+
+    @available_shortcuts.setter
+    def available_shortcuts(self, shortcuts):
+        self._input_states[self._active_ui_layer].shortcuts = shortcuts
+
+    @property
+    def is_search_opened(self):
+        return self._input_states[self._active_ui_layer].search_opened
+
+    @is_search_opened.setter
+    def is_search_opened(self, opened):
+        self._input_states[self._active_ui_layer].search_opened = opened
+
+    def _sync_controller_shortcuts(self):
+        if hasattr(self.controller, "available_shortcuts"):
+            self.controller.available_shortcuts = self.available_shortcuts.copy()
+
+    @property
+    def is_in_lobby(self):
+        return self._lobby_open and self._active_ui_layer is UiLayer.MAIN
+
+    @is_in_lobby.setter
+    def is_in_lobby(self, in_lobby):
+        self._lobby_open = in_lobby
+
+    def is_command_allowed(self, cmd):
+        if self.should_start_accelerometer:
+            return cmd == Command.PAUSE
+        if not self._input_states[self._active_ui_layer].enabled:
+            return False
+        if cmd == Command.ACCEPT and self.is_in_lobby:
+            return self._has_lobby_start_button and self.is_lobby_start_allowed
+        if cmd in {
+            Command.UP, Command.RIGHT, Command.DOWN, Command.LEFT,
+            Command.ACCEPT, Command.V1_KEYBOARD_ERROR_OK, Command.NEXT_ACTION,
+        }:
+            return self.is_input_allowed
+        if cmd == Command.PAUSE:
+            return Command.PAUSE in self.available_shortcuts or (
+                self.is_input_allowed and self.is_shortcuts_allowed
+            )
+        return self.is_shortcuts_allowed and (
+            cmd in self.available_shortcuts or (cmd == Command.BACK and self.is_input_allowed)
+        )
 
     async def get_access_token(self):
         headers = {
@@ -352,7 +426,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         # A new connection may open a pause menu without repeating the stop-scoring message.
         self.should_start_accelerometer = False
         self.controller.set_accel_collection(False)
-        self.is_input_allowed = False
+        self._reset_input_state()
+        self._sync_controller_shortcuts()
         self.accel_data.clear()
 
         if (
@@ -443,6 +518,30 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         }
         await self.on_state_changed(self.profile_data)
 
+    async def parse_phone_setup_data(self, message):
+        # Discard queued presses so they cannot act on the new screen.
+        self.controller.get_latest_command(commands_to_check=set())
+        layer = UiLayer.POPUP if message.get("isPopup") else UiLayer.MAIN
+        setup_data = message.get("setupData", {})
+        state = UiInputState(
+            enabled=(
+                bool(message.get("inputSetup", {}).get("isEnabled"))
+                and setup_data.get("__class") != "JD_SimplePhoneUiData"
+            )
+        )
+        if setup_data.get("gameplaySetup", {}).get("pauseSlider", {}):
+            state.shortcuts.add(Command.PAUSE)
+        self._input_states[layer] = state
+        self._active_ui_layer = layer
+        if layer is UiLayer.MAIN:
+            self._lobby_open = bool(setup_data.get("lobbySetup"))
+            start_button = setup_data.get("lobbySetup", {}).get("startButton")
+            self._has_lobby_start_button = start_button is not None
+            self.is_lobby_start_allowed = (
+                self._has_lobby_start_button and bool(start_button.get("isEnabled", True))
+            )
+        self._sync_controller_shortcuts()
+
     async def on_message(self, message_str):
         message = json.loads(message_str)
         __class = message.get("__class")
@@ -494,19 +593,28 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             self.accel_data.clear()
             self.controller.set_accel_collection(False)
             self.should_start_accelerometer = False
-        elif __class == "InputSetup_ConsoleCommandData":
-            if message.get("isEnabled", 0) == 1:
-                self.is_input_allowed = True
-        elif __class == "EnableCarousel_ConsoleCommandData":
-            if message.get("isEnabled", 0) == 1:
-                self.is_input_allowed = True
+        elif __class in {"InputSetup_ConsoleCommandData", "EnableCarousel_ConsoleCommandData"}:
+            # Discard queued presses so enabling input cannot replay an old action.
+            self.controller.get_latest_command(commands_to_check=set())
+            layer = UiLayer.POPUP if message.get("applyOnPopup") else UiLayer.MAIN
+            state = self._input_states[layer]
+            enabled = bool(message.get("isEnabled"))
+            if __class == "InputSetup_ConsoleCommandData":
+                state.enabled = enabled
+            else:
+                state.carousel_enabled = enabled
         elif __class == "JD_EnableLobbyStartbutton_ConsoleCommandData":
-            if message.get("isEnabled", 0) == 1:
-                self.is_input_allowed = True
+            # Discard queued confirmations so enabling Start cannot launch the song.
+            self.controller.get_latest_command(commands_to_check=set())
+            self.is_lobby_start_allowed = bool(message.get("isEnabled"))
         elif __class == "ShortcutSetup_ConsoleCommandData":
-            if message.get("isEnabled", 0) == 1:
-                self.is_input_allowed = True
+            # Discard queued presses so enabling shortcuts requires a fresh press.
+            self.controller.get_latest_command(commands_to_check=set())
+            # The app shares this flag between the main screen and its popup.
+            self.is_shortcuts_allowed = bool(message.get("isEnabled"))
         elif __class == "JD_PhoneUiShortcutData":
+            # Discard queued presses so they cannot trigger newly assigned shortcuts.
+            self.controller.get_latest_command(commands_to_check=set())
             shortcuts = set()
             for item in message.get("shortcuts", []):
                 if item["__class"] == "JD_PhoneAction_Shortcut":
@@ -518,55 +626,59 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                             item.get("shortcutType"),
                             item,
                         )
-            self.available_shortcuts = shortcuts
-            if hasattr(self.controller, "available_shortcuts"):
-                self.controller.available_shortcuts = shortcuts
+            layer = self._active_ui_layer
+            if "applyOnPopup" in message:
+                layer = UiLayer.POPUP if message["applyOnPopup"] else UiLayer.MAIN
+            self._input_states[layer].shortcuts = shortcuts
+            self._sync_controller_shortcuts()
         elif __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
             self.is_search_opened = True
         elif __class == "JD_CancelKeyboard_ConsoleCommandData":
             self.is_search_opened = False
         elif __class == "JD_ClosePopup_ConsoleCommandData":
+            # Discard queued popup presses so they cannot act on the underlying screen.
+            self.controller.get_latest_command(commands_to_check=set())
             self.is_search_opened = False
+            self._active_ui_layer = UiLayer.MAIN
+            self._sync_controller_shortcuts()
         elif __class == "JD_PhoneUiSetupData":
-            self.is_input_allowed = True
-            self.available_shortcuts = set()
-            if message.get("setupData", {}).get("gameplaySetup", {}).get("pauseSlider", {}):
-                self.available_shortcuts.add(Command.PAUSE)
-
-            if message.get("isPopup") == 1:
-                self.is_input_allowed = True
-            # Disable UI for non-main player with SimplePhoneUiData
-            elif message.get("setupData", {}).get("__class") == "JD_SimplePhoneUiData":
-                logger.debug("%s: JD_SimplePhoneUiData!!!!!!!!!!!!!!", self.controller.serial)
-                self.is_input_allowed = False
-            else:
-                self.is_input_allowed = message.get("inputSetup", {}).get("isEnabled", 0) == 1
-            if hasattr(self.controller, "available_shortcuts"):
-                self.controller.available_shortcuts = self.available_shortcuts.copy()
+            await self.parse_phone_setup_data(message)
 
         await self.on_game_message(message)
 
     async def send_command(self):
+        next_joystick_repeat_time = 0
+        last_joystick_command = None
         while True:
             if not self.is_connected:
                 if not self._websocket_is_open(self.ws):
                     return
+                # Discard presses made before pairing finishes so they cannot replay on connect.
+                self.controller.get_latest_command(commands_to_check=set())
+                last_joystick_command = None
                 await asyncio.sleep(FRAME_DURATION)
                 continue
             try:
                 await asyncio.sleep(FRAME_DURATION)
-                if not self.is_input_allowed and not self.should_start_accelerometer:
-                    continue
+                commands = {cmd for cmd in Command if self.is_command_allowed(cmd)}
+                button_command = self.controller.get_latest_command(commands_to_check=commands)
 
-                if self.should_start_accelerometer:
-                    cmd = self.controller.get_latest_command(commands_to_check={Command.PAUSE})
-                else:
-                    cmd = self.controller.get_latest_command()
+                joystick_command = None
+                if self.is_input_allowed and not self.should_start_accelerometer:
+                    joystick_command = self.controller.get_joystick_command()
+                if joystick_command != last_joystick_command:
+                    next_joystick_repeat_time = 0
+                last_joystick_command = joystick_command
 
-                if not self.should_start_accelerometer and not cmd:
-                    cmd = self.controller.get_joystick_command()
+                # Button presses are discrete events; only a held stick needs a repeat delay.
+                cmd = button_command
+                if (
+                    not cmd and joystick_command in commands
+                    and time.monotonic() >= next_joystick_repeat_time
+                ):
+                    cmd = joystick_command
 
-                if cmd:
+                if cmd and cmd in commands:
                     logger.debug("%s: raw cmd: %s", self.controller.serial, cmd)
                     try:
                         __class, data = await self.preprocess_command(cmd)
@@ -587,12 +699,11 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                     if __class is None:
                         continue
 
-                    if self.is_input_allowed or (
-                        self.should_start_accelerometer and __class == "JD_Pause_PhoneCommandData"
-                    ):
+                    if self.is_command_allowed(cmd):
                         logger.debug("%s: >>> %s %s", self.controller.serial, __class, data)
                         await self.send_message(__class, data)
-                        await asyncio.sleep(FRAME_DURATION * 30)
+                        if not button_command:
+                            next_joystick_repeat_time = time.monotonic() + FRAME_DURATION * 15
             except Exception:
                 logger.exception(
                     "%s: An error occurred in send_command loop.",

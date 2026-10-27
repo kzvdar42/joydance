@@ -147,9 +147,11 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
             get_joystick_command=Mock(return_value=None),
         )
 
+        pending_buttons = iter([Command.ACCEPT])
+
         def button(commands_to_check=None):
             if commands_to_check is None or Command.ACCEPT in commands_to_check:
-                return Command.ACCEPT
+                return next(pending_buttons, None)
             return None
 
         controller.get_latest_command = Mock(side_effect=button)
@@ -193,7 +195,10 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     "ValidateAction_PhoneCommandData",
                     {"rowIndex": 0, "itemIndex": 0, "actionIndex": 0},
                 )
-                controller.get_latest_command.assert_called_once_with()
+                self.assertTrue(any(
+                    Command.ACCEPT in call.kwargs["commands_to_check"]
+                    for call in controller.get_latest_command.call_args_list
+                ))
                 self.assertEqual(game.accel_data, [])
             finally:
                 task.cancel()
@@ -406,6 +411,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_manual_disconnect_stops_pairing_without_reconnecting(self):
         controller = SimpleNamespace(
             serial="test-controller",
+            get_latest_command=Mock(return_value=None),
             is_connected=Mock(return_value=True),
             set_accel_collection=Mock(),
             set_player_led=AsyncMock(),

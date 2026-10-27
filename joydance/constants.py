@@ -51,6 +51,11 @@ class PairingMethod(Enum):
     OLD = "old"
 
 
+class UiLayer(Enum):
+    MAIN = "main"
+    POPUP = "popup"
+
+
 FRAME_DURATION = 0.015  # ~60fps
 SEND_FREQ_MS = 0.05
 ACCEL_ACQUISITION_FREQ_HZ = 200  # Hz
