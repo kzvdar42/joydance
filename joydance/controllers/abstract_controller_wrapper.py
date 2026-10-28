@@ -59,6 +59,10 @@ class AbstractControllerWrapper(ABC):
         """Return the latest command from the controller (button press, etc)."""
         raise NotImplementedError
 
+    def is_command_pressed(self, cmd):
+        """Return whether a button mapped to the command is currently held."""
+        raise NotImplementedError
+
     def set_accel_collection(self, enabled):
         """Start with an empty motion buffer, or stop and discard pending samples."""
         raise NotImplementedError

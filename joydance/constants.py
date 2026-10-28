@@ -116,6 +116,9 @@ V2_INPUT_MAPPING_KEYS = {
 }
 
 
+V2_TAKEOVER_HOLD_DURATION = 2.0
+
+
 class JoyConButton(Enum):
     # Joy-Con (L)
     UP = "up"

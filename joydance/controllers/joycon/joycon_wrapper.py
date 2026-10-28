@@ -77,6 +77,13 @@ class JoyConWrapper(AbstractControllerWrapper):
         """Returns raw button events from the JoyCon."""
         return self.joycon.events()
 
+    def is_command_pressed(self, cmd):
+        button_mapping = PRO_BUTTON_MAPPING if self.is_pro() else BUTTON_MAPPING
+        return self.is_connected() and any(
+            cmd in commands and bool(getattr(self.joycon, button.value, 0))
+            for button, commands in button_mapping.items()
+        )
+
     def get_latest_command(self, commands_to_check=None):
         available_commands = self.available_shortcuts | {
             Command.ACCEPT, Command.BACK, Command.PAUSE,

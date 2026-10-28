@@ -1,5 +1,6 @@
 import logging
 import json
+import time
 from urllib.parse import urlparse
 import ssl
 from websockets.asyncio.client import connect
@@ -11,6 +12,7 @@ from joydance.constants import (
     WS_SUBPROTOCOLS,
     WsSubprotocolVersion,
     V2_INPUT_MAPPING_KEYS,
+    V2_TAKEOVER_HOLD_DURATION,
 )
 from .justdance_abstract import JustDanceGameAbstract
 
@@ -28,13 +30,19 @@ class JustDanceGameV2(JustDanceGameAbstract):
         super().__init__(controller, *args, **kwargs)
         # Keep legacy commands until the server supplies its own mapping table.
         self._input_commands = None
+        self._takeover_hold_enabled = False
+        self._confirm_hold_started_at = None
 
     def _reset_input_state(self):
         super()._reset_input_state()
         self._input_commands = None
+        self._takeover_hold_enabled = False
+        self._confirm_hold_started_at = None
 
     def is_command_allowed(self, cmd):
         if not super().is_command_allowed(cmd):
+            return False
+        if self._takeover_hold_enabled and cmd == Command.ACCEPT and self._input_commands is None:
             return False
         if self._input_commands is not None and cmd in V2_INPUT_MAPPING_KEYS:
             return cmd in self._input_commands
@@ -42,13 +50,45 @@ class JustDanceGameV2(JustDanceGameAbstract):
 
     async def on_message(self, message_str):
         message = json.loads(message_str)
-        if message.get("__class") == "JD_InputCollectionPhoneData":
+        message_class = message.get("__class")
+        if message_class == "JD_OpenTakeMasterScreen_ConsoleCommandData":
+            # A button already held when the prompt opens must not take over navigation.
+            self.controller.get_latest_command(commands_to_check=set())
+            self._takeover_hold_enabled = True
+            self._confirm_hold_started_at = None
+        elif message_class == "JD_ClosePopup_ConsoleCommandData":
+            self._takeover_hold_enabled = False
+            self._confirm_hold_started_at = None
+        elif message_class in {
+            "InputSetup_ConsoleCommandData", "EnableCarousel_ConsoleCommandData",
+            "JD_PhoneUiSetupData", "JD_EnableAccelValuesSending_ConsoleCommandData",
+        }:
+            self._confirm_hold_started_at = None
+        if message_class == "JD_InputCollectionPhoneData":
             self._parse_input_collection(message)
         await super().on_message(message_str)
+
+    def _get_button_command(self, commands):
+        cmd = super()._get_button_command(commands)
+        if not self._takeover_hold_enabled:
+            return cmd
+        if Command.ACCEPT not in commands or not self.controller.is_command_pressed(Command.ACCEPT):
+            self._confirm_hold_started_at = None
+        elif cmd == Command.ACCEPT:
+            self._confirm_hold_started_at = time.monotonic()
+        elif (
+            cmd is None and self._confirm_hold_started_at is not None
+            and time.monotonic() - self._confirm_hold_started_at >= V2_TAKEOVER_HOLD_DURATION
+        ):
+            # Require another press before this hold can trigger again.
+            self._confirm_hold_started_at = None
+            return Command.ACCEPT
+        return None if cmd == Command.ACCEPT else cmd
 
     def _parse_input_collection(self, message):
         # Discard queued presses so they cannot trigger newly assigned commands.
         self.controller.get_latest_command(commands_to_check=set())
+        self._confirm_hold_started_at = None
         # The app replaces this connection-wide table independently of screen setup.
         self._input_commands = {}
         available_input = message.get("availableInput", {})

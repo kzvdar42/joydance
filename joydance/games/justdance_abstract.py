@@ -647,6 +647,9 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
         await self.on_game_message(message)
 
+    def _get_button_command(self, commands):
+        return self.controller.get_latest_command(commands_to_check=commands)
+
     async def send_command(self):
         next_joystick_repeat_time = 0
         last_joystick_command = None
@@ -662,7 +665,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             try:
                 await asyncio.sleep(FRAME_DURATION)
                 commands = {cmd for cmd in Command if self.is_command_allowed(cmd)}
-                button_command = self.controller.get_latest_command(commands_to_check=commands)
+                button_command = self._get_button_command(commands)
 
                 joystick_command = None
                 if self.is_input_allowed and not self.should_start_accelerometer:
