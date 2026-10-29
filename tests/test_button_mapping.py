@@ -8,7 +8,7 @@ from websockets.protocol import State
 
 from joydance.constants import Command
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
-from joydance.controllers.joycon.pycon.constants import JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID
+from joydance.controllers.joycon.pycon.constants import JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID
 from joydance.controllers.joycon.pycon.event import ButtonEventJoyCon
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
@@ -1007,22 +1007,72 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(game.row_num, 1)
         self.assertFalse(game.is_input_allowed)
 
-    async def test_popup_preserves_underlying_keyboard_routing(self):
-        game = self.make_game(JustDanceGameV1)
-        await game.on_message(json.dumps(menu_setup()))
-        await self.message(game, "JD_OpenPhoneKeyboard_ConsoleCommandData")
-        popup = menu_setup()
-        popup["isPopup"] = True
-        await game.on_message(json.dumps(popup))
-        self.assertFalse(game.is_search_opened)
-        self.assertEqual(await game.preprocess_command(Command.BACK), (
-            "JD_Custom_PhoneCommandData", {"identifier": Command.BACK.value},
-        ))
-        await self.message(game, "JD_ClosePopup_ConsoleCommandData")
-        self.assertTrue(game.is_search_opened)
-        self.assertEqual(await game.preprocess_command(Command.BACK), (
-            "JD_CancelKeyboard_PhoneCommandData", {},
-        ))
+    async def test_replaced_keyboard_is_not_restored_on_popup_close(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                game = self.make_game(game_class)
+                await game.on_message(json.dumps(menu_setup()))
+                await self.message(game, "JD_OpenPhoneKeyboard_ConsoleCommandData")
+                popup = menu_setup()
+                popup["isPopup"] = True
+                await game.on_message(json.dumps(popup))
+                self.assertFalse(game.is_search_opened)
+                await self.message(game, "JD_ClosePopup_ConsoleCommandData")
+                self.assertFalse(game.is_search_opened)
+                self.assertEqual(await game.preprocess_command(Command.BACK), (
+                    "JD_Custom_PhoneCommandData", {"identifier": Command.BACK.value},
+                ))
+
+    async def test_keyboard_survives_partial_popup_input_updates(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                game = self.make_game(game_class)
+                await self.message(game, "JD_OpenPhoneKeyboard_ConsoleCommandData")
+                await self.message(game, "JD_PhoneUiSetupData", isPopup=True, inputSetup={"isEnabled": False})
+                self.assertTrue(game.is_search_opened)
+                self.assertEqual(await game.preprocess_command(Command.BACK), (
+                    "JD_CancelKeyboard_PhoneCommandData", {},
+                ))
+
+    async def test_controllers_cancel_keyboard_with_navigation_disabled(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            for product_id, button in (
+                (JOYCON_L_PRODUCT_ID, "down"), (JOYCON_R_PRODUCT_ID, "b"),
+                (JOYCON_PRO_PRODUCT_ID, "b"), (JOYCON_PRO_PRODUCT_ID, "minus"),
+            ):
+                with self.subTest(protocol=game_class.__name__, controller=product_id, button=button):
+                    game = self.make_game(game_class)
+                    game.controller.product_id = product_id
+                    game.controller.joycon.joycon_button_event(button, 1)
+                    await self.message(game, "JD_OpenPhoneKeyboard_ConsoleCommandData")
+                    self.assertEqual(game.controller.joycon._events_buffer, [])
+                    await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=False)
+                    await self.message(game, "ShortcutSetup_ConsoleCommandData", isEnabled=False)
+                    if game_class is JustDanceGameV2:
+                        await game.on_message(json.dumps(input_collection({})))
+                    commands = {cmd for cmd in Command if game.is_command_allowed(cmd)}
+                    self.assertEqual(commands, {Command.BACK})
+                    game.should_start_accelerometer = True
+                    self.assertFalse(game.is_command_allowed(Command.BACK))
+                    game.should_start_accelerometer = False
+                    read_buttons = game.controller.get_latest_command
+                    await self.run_input_frames(game, [(0, button, None)])
+                    game.send_message.assert_awaited_once_with("JD_CancelKeyboard_PhoneCommandData", {})
+                    game.controller.get_latest_command = read_buttons
+                    await self.message(game, "JD_CancelKeyboard_ConsoleCommandData")
+                    self.assertFalse(game.is_search_opened)
+                    self.assertFalse(game.is_command_allowed(Command.BACK))
+
+    async def test_keyboard_submission_is_redacted_in_game_logs_but_sent_intact(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                game = self.make_game(game_class)
+                game.ws = SimpleNamespace(state=State.OPEN, send=AsyncMock())
+                with self.assertLogs("joydance", level="DEBUG") as logs:
+                    await game.send_message("JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": "private-test-input"})
+                self.assertNotIn("private-test-input", "\n".join(logs.output))
+                self.assertIn("JD_SubmitKeyboard_PhoneCommandData", "\n".join(logs.output))
+                self.assertEqual(json.loads(game.ws.send.await_args.args[0])["root"]["keyboardOutput"], "private-test-input")
 
     async def test_permissions_are_independent_for_each_controller(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):

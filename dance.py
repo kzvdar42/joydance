@@ -13,6 +13,7 @@ from aiohttp import WSMsgType, web
 from joydance.config_handler import ConfigHandler, get_datadir
 from joydance.constants import (
     WsCommand,
+    PairingState,
     PairingMethod,
     JOYDANCE_VERSION,
     BASE_CONTROLLER_STATE_INFO,
@@ -64,6 +65,8 @@ async def connect_controller(app, ws, data) -> None:
         try:
             app["controllers_info"][serial].update(update_dict)
             await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
+            if update_dict.get("state") == PairingState.DISCONNECTED.value:
+                await ws_broadcast_response(app, WsCommand.HIDE_SEARCH, {"serial": serial})
         except Exception as e:
             logger.error("Error in on_joydance_state_changed: %s", e, exc_info=True)
 
@@ -71,8 +74,13 @@ async def connect_controller(app, ws, data) -> None:
         try:
             __class = message.get("__class")
             if __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
-                await ws_broadcast_response(app, WsCommand.SHOW_SEARCH, {"serial": serial})
-            elif __class == "JD_CancelKeyboard_ConsoleCommandData":
+                await ws_broadcast_response(app, WsCommand.SHOW_SEARCH, {
+                    "serial": serial, "isPassword": bool(message.get("isPassword")),
+                })
+            elif __class in {"JD_CancelKeyboard_ConsoleCommandData", "JD_ClosePopup_ConsoleCommandData"} or (
+                __class == "JD_PhoneUiSetupData" and message.get("isPopup")
+                and isinstance(message.get("setupData"), dict)
+            ):
                 await ws_broadcast_response(app, WsCommand.HIDE_SEARCH, {"serial": serial})
         except Exception as e:
             logger.error("Error in on_game_message: %s", e, exc_info=True)
@@ -271,16 +279,15 @@ async def websocket_handler(request):
         await ws.prepare(request)
         request.app["websockets"].add(ws)
         async for msg in ws:
-            logger.debug("got ws msg %s", msg)
             if msg.type == WSMsgType.TEXT:
                 cmd = None
                 try:
                     msg_data = msg.json()
                     cmd = WsCommand(msg_data["cmd"])
                     data = msg_data.get("data", {})
+                    logger.debug("got ws command %s", cmd.value)
                 except (ValueError, KeyError) as e:
                     logger.error("Invalid message format: %s", e)
-                    logger.error("Message content: %s", msg.data)
                     continue
                 except Exception as e:
                     logger.error("Unexpected error parsing message: %s", e, exc_info=True)
@@ -289,13 +296,12 @@ async def websocket_handler(request):
                 try:
                     if cmd == WsCommand.SEARCH_INPUT:
                         text = data.get("text", "")
-                        if not request.app["joydance_connections"]:
-                            logger.warning("SEARCH_INPUT received but no controller connected")
+                        serial = data.get("controller_serial")
+                        if not isinstance(serial, str) or serial not in request.app["joydance_connections"]:
+                            logger.warning("SEARCH_INPUT received for unknown controller: %s", serial)
                             continue
-                        # TODO: use main controller?
-                        serial = next(iter(request.app["joydance_connections"]))
                         joydance = request.app["joydance_connections"][serial]
-                        if joydance.is_search_opened:
+                        if joydance.is_connected and joydance.is_search_opened:
                             await joydance.send_message(
                                 "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": text}
                             )

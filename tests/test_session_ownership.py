@@ -1,5 +1,6 @@
 import asyncio
 from collections import defaultdict
+import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -50,6 +51,55 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def stop_all_sessions(self):
         for game in self.sessions:
             await game.disconnect(should_reconnect=False)
+
+    async def test_popup_close_and_disconnect_hide_keyboard_in_all_browsers(self):
+        self.controller.get_latest_command = Mock(return_value=None)
+        browsers = [Mock(closed=False, send_json=AsyncMock()) for _ in range(2)]
+        self.app["websockets"].update(browsers)
+        for method in ("old", "fast"):
+            for reason in ("popup", "replacement", "manual_disconnect", "connection_loss"):
+                with self.subTest(protocol=method, reason=reason):
+                    data = {**self.data, "pairing_method": method}
+                    await dance.connect_controller(self.app, self.ws, data)
+                    game = self.app["joydance_connections"]["test"]
+                    game.is_connected = True
+                    for browser in browsers:
+                        browser.send_json.reset_mock()
+                    await game.on_message(json.dumps({"__class": "JD_OpenPhoneKeyboard_ConsoleCommandData", "isPassword": True}))
+                    for browser in browsers:
+                        browser.send_json.assert_awaited_once_with({
+                            "cmd": "resp_show_search", "data": {"serial": "test", "isPassword": True},
+                        })
+                        browser.send_json.reset_mock()
+
+                    with patch.object(game, "attempt_reconnect", new=asyncio.Event().wait):
+                        if reason == "popup":
+                            await game.on_message(json.dumps({"__class": "JD_ClosePopup_ConsoleCommandData"}))
+                        elif reason == "replacement":
+                            await game.on_message(json.dumps({
+                                "__class": "JD_PhoneUiSetupData", "isPopup": True,
+                                "inputSetup": {"isEnabled": False},
+                            }))
+                            self.assertTrue(game.is_search_opened)
+                            for browser in browsers:
+                                browser.send_json.assert_not_awaited()
+                            await game.on_message(json.dumps({
+                                "__class": "JD_PhoneUiSetupData", "isPopup": True,
+                                "setupData": {"__class": "JD_GenericPhoneUiData"},
+                            }))
+                        elif reason == "manual_disconnect":
+                            await dance.disconnect_controller(self.app, self.ws, data)
+                        else:
+                            await game.disconnect(should_reconnect=True)
+                        self.assertFalse(game.is_search_opened)
+                        for browser in browsers:
+                            keyboard_updates = [
+                                call.args[0] for call in browser.send_json.await_args_list
+                                if call.args[0]["cmd"] == "resp_hide_search"
+                            ]
+                            self.assertEqual(keyboard_updates, [{
+                                "cmd": "resp_hide_search", "data": {"serial": "test"},
+                            }])
 
     async def test_replacement_and_stop_leave_no_old_pairing_or_retry_tasks(self):
         for method in ("old", "fast"):

@@ -59,7 +59,7 @@ class App extends Component {
             cmd: cmd,
             data: data
         };
-        console.log('Sending WebSocket message:', msg);
+        console.log('Sending WebSocket message:', cmd === WsCommand.SEARCH_INPUT ? {cmd} : msg);
         this.socket.send(JSON.stringify(msg));
         return true;
     }

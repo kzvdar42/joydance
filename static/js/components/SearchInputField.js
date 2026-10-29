@@ -7,16 +7,20 @@ export default class SearchInputField extends Component {
         super(props)
         this.state = {
             text: '',
-            // FIXME: after adding support for show/hide keyboard, set isVisible to false 
-            isVisible: true
+            controllerSerial: null,
+            isPassword: false
         }
 
         this.handleInput = this.handleInput.bind(this)
         this.handleSubmit = this.handleSubmit.bind(this)
 
         // Listen for keyboard show/hide events from server
-        window.mitty.on('show_search', () => this.setState({isVisible: true}))
-        window.mitty.on('hide_search', () => this.setState({isVisible: false}))
+        window.mitty.on('show_search', ({serial, isPassword = false}) => this.setState({
+            controllerSerial: serial, text: '', isPassword
+        }))
+        window.mitty.on('hide_search', ({serial}) => this.setState(state => (
+            state.controllerSerial === serial ? {controllerSerial: null, text: '', isPassword: false} : null
+        )))
     }
 
     handleInput(e) {
@@ -26,21 +30,23 @@ export default class SearchInputField extends Component {
 
     handleSubmit(e) {
         e.preventDefault()
+        if (!this.state.controllerSerial) return
         window.mitty.emit('req_' + WsCommand.SEARCH_INPUT, {
-            text: this.state.text
+            text: this.state.text,
+            controller_serial: this.state.controllerSerial
         })
         this.setState({text: ''})
     }
 
     render(props, state) {
-        if (!state.isVisible) return null
+        if (!state.controllerSerial) return null
 
         return html`
             <div class="search-overlay">
                 <h2 class="pure-u-18-24">Search</h2>
                 <form class="pure-form" onSubmit=${this.handleSubmit}>
                     <input 
-                        type="text" 
+                        type=${state.isPassword ? 'password' : 'text'}
                         value=${state.text}
                         onInput=${this.handleInput}
                         autoFocus

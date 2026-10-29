@@ -252,6 +252,8 @@ class JustDanceGameV2(JustDanceGameAbstract):
     async def preprocess_command(self, cmd):
         if not self.is_command_allowed(cmd):
             return None, None
+        if cmd == Command.BACK and self.is_search_opened:
+            return "JD_CancelKeyboard_PhoneCommandData", {}
         if self._input_commands is not None and cmd in V2_INPUT_MAPPING_KEYS:
             data = self._input_commands[cmd].copy()
             return data.pop("__class"), data

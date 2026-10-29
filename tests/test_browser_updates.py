@@ -14,6 +14,57 @@ from joydance.games.justdance_v2 import JustDanceGameV2
 
 
 class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_keyboard_replies_target_the_requesting_controller_from_either_browser(self):
+        first = SimpleNamespace(is_connected=True, is_search_opened=True, send_message=AsyncMock())
+        second = SimpleNamespace(is_connected=True, is_search_opened=True, send_message=AsyncMock())
+        app = web.Application()
+        app.update({"websockets": set(), "joydance_connections": {"first": first, "second": second}})
+        app.router.add_get("/ws", dance.websocket_handler)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        browsers = [await client.ws_connect("/ws"), await client.ws_connect("/ws")]
+
+        cases = (
+            ("second", True, True, second),
+            ("first", True, True, first),
+            ("unknown", True, True, None),
+            (None, True, True, None),
+            ([], True, True, None),
+            ("second", False, True, None),
+            ("second", True, False, None),
+        )
+        with (
+            patch.object(dance, "update_controllers_info", new=AsyncMock(return_value=[])),
+            self.assertLogs("dance", level="DEBUG") as logs,
+        ):
+            for browser in browsers:
+                for serial, keyboard_open, connected, target in cases:
+                    with self.subTest(browser=browsers.index(browser), serial=serial, keyboard_open=keyboard_open, connected=connected):
+                        first.send_message.reset_mock()
+                        second.send_message.reset_mock()
+                        second.is_search_opened = keyboard_open
+                        second.is_connected = connected
+                        data = {"text": "Test song"}
+                        if serial is not None:
+                            data["controller_serial"] = serial
+                        await browser.send_json({"cmd": "search_input", "data": data})
+                        # The following response confirms the preceding input has been handled.
+                        await browser.send_json({"cmd": "get_controller_list"})
+                        self.assertEqual((await browser.receive_json(timeout=1))["cmd"], "resp_get_controller_list")
+                        for game in (first, second):
+                            if game is target:
+                                game.send_message.assert_awaited_once_with(
+                                    "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": "Test song"},
+                                )
+                            else:
+                                game.send_message.assert_not_awaited()
+            await browsers[0].send_json({"cmd": "invalid", "data": {"text": "Test song"}})
+            await browsers[0].send_str('{"cmd":"search_input","data":{"text":"Test song",invalid}}')
+            await browsers[0].send_json({"cmd": "get_controller_list"})
+            self.assertEqual((await browsers[0].receive_json(timeout=1))["cmd"], "resp_get_controller_list")
+        self.assertNotIn("Test song", "\n".join(logs.output))
+
     async def test_existing_game_delivers_state_keyboard_and_rumble_after_browser_reconnect(self):
         controller = SimpleNamespace(
             serial="test", set_accel_collection=Mock(), set_player_led=AsyncMock(), set_rumble=Mock(),
@@ -54,7 +105,10 @@ class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await game.on_game_message({"__class": message_class})
                 for browser in (replacement, another_browser):
-                    self.assertEqual(await browser.receive_json(timeout=1), {"cmd": command, "data": {"serial": "test"}})
+                    expected = {"serial": "test"}
+                    if command == "resp_show_search":
+                        expected["isPassword"] = False
+                    self.assertEqual(await browser.receive_json(timeout=1), {"cmd": command, "data": expected})
 
             await replacement.send_json({"cmd": "toggle_rumble", "data": {"controller_serial": "test", "enabled": False}})
             for browser in (replacement, another_browser):

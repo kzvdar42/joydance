@@ -28,7 +28,6 @@ class UiInputState:
     enabled: bool = False
     carousel_enabled: bool = True
     shortcuts: set[Command] = field(default_factory=set)
-    search_opened: bool = False
 
 
 class JustDanceGameAbstract(AbstractGameWrapper, ABC):
@@ -66,6 +65,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.number_of_accels_sent = 0
         self._scoring_session_id = 0
         self.should_start_accelerometer = False
+        self.is_search_opened = False
         self._reset_input_state()
         self.profile_data = {}
         self.accel_data = []
@@ -84,6 +84,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.requires_punch_pairing = False
 
     def _reset_input_state(self):
+        self.is_search_opened = False
         self._active_ui_layer = UiLayer.MAIN
         # Keep the underlying screen's controls intact while a popup has focus.
         self._input_states = {layer: UiInputState() for layer in UiLayer}
@@ -109,14 +110,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     def available_shortcuts(self, shortcuts):
         self._input_states[self._active_ui_layer].shortcuts = shortcuts
 
-    @property
-    def is_search_opened(self):
-        return self._input_states[self._active_ui_layer].search_opened
-
-    @is_search_opened.setter
-    def is_search_opened(self, opened):
-        self._input_states[self._active_ui_layer].search_opened = opened
-
     def _sync_controller_shortcuts(self):
         if hasattr(self.controller, "available_shortcuts"):
             self.controller.available_shortcuts = self.available_shortcuts.copy()
@@ -132,6 +125,9 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     def is_command_allowed(self, cmd):
         if self.should_start_accelerometer:
             return cmd == Command.PAUSE
+        # The app's keyboard Cancel action is independent of navigation permissions.
+        if self.is_search_opened and cmd == Command.BACK:
+            return True
         if not self._input_states[self._active_ui_layer].enabled:
             return False
         if cmd == Command.ACCEPT and self.is_in_lobby:
@@ -209,7 +205,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
     async def send_message(self, __class, data={}):
         if __class != "JD_PhoneScoringData":
-            logger.debug("%s: >>> %s %s", self.controller.serial, __class, data)
+            logger.debug(
+                "%s: >>> %s %s", self.controller.serial, __class,
+                "[redacted]" if __class == "JD_SubmitKeyboard_PhoneCommandData" else data,
+            )
         msg = {"root": {"__class": __class}}
         if data:
             msg["root"].update(data)
@@ -523,6 +522,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.controller.get_latest_command(commands_to_check=set())
         layer = UiLayer.POPUP if message.get("isPopup") else UiLayer.MAIN
         setup_data = message.get("setupData", {})
+        if message.get("isPopup") and isinstance(message.get("setupData"), dict):
+            self.is_search_opened = False
         state = UiInputState(
             enabled=(
                 bool(message.get("inputSetup", {}).get("isEnabled"))
@@ -633,8 +634,12 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             self._input_states[layer].shortcuts = shortcuts
             self._sync_controller_shortcuts()
         elif __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
+            # Require a fresh press before allowing keyboard cancellation.
+            self.controller.get_latest_command(commands_to_check=set())
             self.is_search_opened = True
         elif __class == "JD_CancelKeyboard_ConsoleCommandData":
+            # Discard keyboard presses before returning to the underlying screen.
+            self.controller.get_latest_command(commands_to_check=set())
             self.is_search_opened = False
         elif __class == "JD_ClosePopup_ConsoleCommandData":
             # Discard queued popup presses so they cannot act on the underlying screen.
