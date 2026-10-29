@@ -61,8 +61,12 @@ class JustDanceGameV2(JustDanceGameAbstract):
             self._confirm_hold_started_at = None
         elif message_class in {
             "InputSetup_ConsoleCommandData", "EnableCarousel_ConsoleCommandData",
-            "JD_PhoneUiSetupData", "JD_EnableAccelValuesSending_ConsoleCommandData",
-        }:
+            "JD_EnableAccelValuesSending_ConsoleCommandData",
+        } or (
+            message_class == "JD_PhoneUiSetupData" and (
+                isinstance(message.get("setupData"), dict) or isinstance(message.get("inputSetup"), dict)
+            )
+        ):
             self._confirm_hold_started_at = None
         if message_class == "JD_InputCollectionPhoneData":
             self._parse_input_collection(message)

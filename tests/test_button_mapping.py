@@ -549,7 +549,7 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.game.available_shortcuts, {Command.PAUSE})
         self.assertEqual(self.controller.available_shortcuts, {Command.PAUSE})
-        for data in ({}, {"setupData": {"shortcuts": None}}):
+        for data in ({"setupData": {}}, {"setupData": {"shortcuts": None}}):
             with self.subTest(data=data):
                 self.game.available_shortcuts = {Command.PAUSE}
                 self.controller.available_shortcuts = {Command.PAUSE}
@@ -597,6 +597,84 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def message(self, game, name, **data):
         await game.on_message(json.dumps({"__class": name, **data}))
+
+    async def test_partial_ui_updates_preserve_lobby_coaches_and_shortcuts(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                game = self.make_game(game_class)
+                setup = lobby_setup(selected_coach=1)
+                setup["setupData"]["lobbySetup"]["startButton"] = {"isEnabled": True}
+                setup["setupData"]["gameplaySetup"] = {"pauseSlider": {"isEnabled": True}}
+                await game.on_message(json.dumps(setup))
+                if game_class is JustDanceGameV1:
+                    await game.preprocess_command(Command.RIGHT)
+                    self.assertEqual(game.coach_id, 2)
+                for update, enabled in (
+                    ({}, True),
+                    ({"setupData": None, "inputSetup": None}, True),
+                    ({"inputSetup": {"isEnabled": False}}, False),
+                    ({"inputSetup": {"isEnabled": True}}, True),
+                ):
+                    await self.message(game, "JD_PhoneUiSetupData", **update)
+                    self.assertTrue(game.is_in_lobby)
+                    self.assertTrue(game.is_lobby_start_allowed)
+                    self.assertEqual(game.is_input_allowed, enabled)
+                    self.assertEqual(game.available_shortcuts, {Command.PAUSE})
+                    self.assertEqual(game.controller.available_shortcuts, {Command.PAUSE})
+                    if game_class is JustDanceGameV1:
+                        self.assertTrue(game.is_main_player)
+                        self.assertEqual(game.num_coaches, 3)
+                        self.assertEqual(game.coach_id, 2)
+                if game_class is JustDanceGameV1:
+                    self.assertEqual(await game.preprocess_command(Command.LEFT), (
+                        "JD_ChangeCoach_PhoneCommandData", {"coachId": 1},
+                    ))
+
+    async def test_partial_ui_input_targets_its_layer_without_changing_popup_focus(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                game = self.make_game(game_class)
+                setup = menu_setup()
+                setup["setupData"]["mainCarousel"]["rows"][1]["items"][0]["isEnabled"] = False
+                await game.on_message(json.dumps(setup))
+                await self.message(game, "JD_PhoneUiShortcutData", applyOnPopup=False, shortcuts=[{
+                    "__class": "JD_PhoneAction_Shortcut", "shortcutType": Command.UPLOAD.value,
+                }])
+                popup = menu_setup()
+                popup["isPopup"] = True
+                popup["inputSetup"]["carouselPosSetup"]["itemIndex"] = 1
+                popup["setupData"]["mainCarousel"]["rows"][0]["items"][0]["isEnabled"] = False
+                await game.on_message(json.dumps(popup))
+                await self.message(game, "JD_PhoneUiShortcutData", applyOnPopup=True, shortcuts=[{
+                    "__class": "JD_PhoneAction_Shortcut", "shortcutType": Command.SKIP.value,
+                }])
+
+                await self.message(game, "JD_PhoneUiSetupData", inputSetup={
+                    "isEnabled": False, "applyOnPopup": False,
+                    "carouselPosSetup": {"rowIndex": 1, "itemIndex": 0, "actionIndex": 0},
+                })
+                self.assertTrue(game.is_input_allowed)
+                self.assertEqual(game.available_shortcuts, {Command.SKIP})
+                if game_class is JustDanceGameV1:
+                    self.assertEqual((game.row_num, game.col_num_per_row_id[0]), (0, 1))
+
+                for enabled in (False, True):
+                    await self.message(game, "JD_PhoneUiSetupData", inputSetup={
+                        "isEnabled": enabled, "applyOnPopup": True,
+                        "carouselPosSetup": {"rowIndex": 0, "itemIndex": 0, "actionIndex": 0},
+                    })
+                    self.assertEqual(game.is_input_allowed, enabled)
+                    self.assertEqual(game.available_shortcuts, {Command.SKIP})
+                    self.assertEqual(game.controller.available_shortcuts, {Command.SKIP})
+                if game_class is JustDanceGameV1:
+                    self.assertFalse(game.is_command_allowed(Command.ACCEPT))
+                await self.message(game, "JD_ClosePopup_ConsoleCommandData")
+                self.assertFalse(game.is_input_allowed)
+                self.assertEqual(game.available_shortcuts, {Command.UPLOAD})
+                await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=True)
+                if game_class is JustDanceGameV1:
+                    self.assertEqual(game.row_num, 1)
+                    self.assertFalse(game.is_command_allowed(Command.ACCEPT))
 
     async def test_v2_uses_server_provided_direction_and_confirm_commands(self):
         game = self.make_game(JustDanceGameV2)

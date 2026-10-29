@@ -517,12 +517,24 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         }
         await self.on_state_changed(self.profile_data)
 
+    async def parse_input_setup_data(self, message):
+        # Discard queued presses so enabling input requires a fresh press.
+        self.controller.get_latest_command(commands_to_check=set())
+        layer = UiLayer.POPUP if message.get("applyOnPopup") else UiLayer.MAIN
+        self._input_states[layer].enabled = bool(message.get("isEnabled"))
+
     async def parse_phone_setup_data(self, message):
+        setup_data = message.get("setupData")
+        if not isinstance(setup_data, dict):
+            # The app keeps the screen when only input setup or metadata is supplied.
+            input_setup = message.get("inputSetup")
+            if isinstance(input_setup, dict):
+                await self.parse_input_setup_data(input_setup)
+            return
         # Discard queued presses so they cannot act on the new screen.
         self.controller.get_latest_command(commands_to_check=set())
         layer = UiLayer.POPUP if message.get("isPopup") else UiLayer.MAIN
-        setup_data = message.get("setupData", {})
-        if message.get("isPopup") and isinstance(message.get("setupData"), dict):
+        if message.get("isPopup"):
             self.is_search_opened = False
         state = UiInputState(
             enabled=(
@@ -595,16 +607,14 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             self.accel_data.clear()
             self.controller.set_accel_collection(False)
             self.should_start_accelerometer = False
-        elif __class in {"InputSetup_ConsoleCommandData", "EnableCarousel_ConsoleCommandData"}:
+        elif __class == "InputSetup_ConsoleCommandData":
+            await self.parse_input_setup_data(message)
+        elif __class == "EnableCarousel_ConsoleCommandData":
             # Discard queued presses so enabling input cannot replay an old action.
             self.controller.get_latest_command(commands_to_check=set())
             layer = UiLayer.POPUP if message.get("applyOnPopup") else UiLayer.MAIN
             state = self._input_states[layer]
-            enabled = bool(message.get("isEnabled"))
-            if __class == "InputSetup_ConsoleCommandData":
-                state.enabled = enabled
-            else:
-                state.carousel_enabled = enabled
+            state.carousel_enabled = bool(message.get("isEnabled"))
         elif __class == "JD_EnableLobbyStartbutton_ConsoleCommandData":
             # Discard queued confirmations so enabling Start cannot launch the song.
             self.controller.get_latest_command(commands_to_check=set())

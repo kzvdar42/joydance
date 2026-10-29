@@ -100,19 +100,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
             return position not in self.carousel_setup["disabled_items"]
         return True
 
-    async def on_message(self, message_str):
-        message_dict = json.loads(message_str)
-        __class = message_dict.get("__class")
-        if __class == "InputSetup_ConsoleCommandData":
-            await self.parse_carousel_position_setup_data(message_dict)
-        await super().on_message(message_str)
-
-    async def parse_carousel_position_setup_data(self, message):
-        carousel_pos_setup = None
-        if "carouselPosSetup" in message:
-            carousel_pos_setup = message["carouselPosSetup"]
-        elif "inputSetup" in message:
-            carousel_pos_setup = message["inputSetup"].get("carouselPosSetup", {})
+    async def parse_input_setup_data(self, message):
+        await super().parse_input_setup_data(message)
+        carousel_pos_setup = message.get("carouselPosSetup")
         if carousel_pos_setup:
             carousel_type = "popup" if message.get("applyOnPopup") else self._screen_carousel_type
             carousel_setup = self._carousel_setup[carousel_type]
@@ -137,7 +127,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
 
     async def parse_phone_setup_data(self, data):
         await super().parse_phone_setup_data(data)
-        setup_data = data.get("setupData", {})
+        setup_data = data.get("setupData")
+        if not isinstance(setup_data, dict):
+            return
         is_popup = bool(data.get("isPopup"))
         if not is_popup:
             # Shared gameplay/recap screens do not establish navigation ownership.

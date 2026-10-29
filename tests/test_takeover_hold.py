@@ -29,6 +29,13 @@ class TakeoverHoldTests(unittest.IsolatedAsyncioTestCase):
     async def message(self, name, **data):
         await self.game.on_message(json.dumps({"__class": name, **data}))
 
+    async def test_metadata_only_ui_updates_preserve_hold_progress(self):
+        self.set_button(True)
+        self.assertIsNone(self.poll(0))
+        await self.message("JD_PhoneUiSetupData", disabledSetupData={})
+        await self.message("JD_PhoneUiSetupData", setupData=None, inputSetup=None)
+        self.assertEqual(self.poll(2.01), Command.ACCEPT)
+
     def set_button(self, pressed, button="a"):
         if bool(getattr(self.controller.joycon, button, 0)) != pressed:
             setattr(self.controller.joycon, button, int(pressed))
