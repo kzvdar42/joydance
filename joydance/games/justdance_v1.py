@@ -24,6 +24,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
     def __init__(self, controller, *args, **kwargs):
         super().__init__(controller, *args, **kwargs)
         self.is_main_player = False
+        self._shortcut_commands = {}
         self._carousel_setup = defaultdict(
             lambda: {
                 "row_num": 0,
@@ -42,6 +43,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
     def _reset_input_state(self):
         super()._reset_input_state()
         self.is_main_player = False
+        self._shortcut_commands = {}
         self._state["is_main_player"] = False
 
     @property
@@ -185,15 +187,26 @@ class JustDanceGameV1(JustDanceGameAbstract):
         shortcuts_data = setup_data.get("shortcuts") or []
         logger.debug("V1 shortcuts_data: %s", shortcuts_data)
         shortcuts = set()
+        shortcut_commands = {}
         if setup_data.get("gameplaySetup", {}).get("pauseSlider", {}):
             shortcuts.add(Command.PAUSE)
         for shortcut in shortcuts_data:
             try:
                 command_root = json.loads(shortcut["command"])["root"]
+                if (
+                    not isinstance(command_root, dict)
+                    or not isinstance(command_root.get("__class"), str)
+                    or not command_root["__class"]
+                ):
+                    raise ValueError("Expected a command object with a class name")
                 if "identifier" in command_root:
-                    shortcuts.add(Command(command_root["identifier"]))
+                    command = Command(command_root["identifier"])
                 elif "input" in command_root:
-                    shortcuts.add(Command(command_root["input"]))
+                    command = Command(command_root["input"])
+                else:
+                    continue
+                shortcuts.add(command)
+                shortcut_commands[command] = command_root
             except Exception:
                 logger.exception("V1: Failed to parse shortcut: %s", shortcut)
         if any(
@@ -202,6 +215,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             for item in row.get("items", [])
         ):
             shortcuts.add(Command.NEXT_ACTION)
+        self._shortcut_commands[self._active_ui_layer] = shortcut_commands
         self.available_shortcuts = shortcuts
         self._sync_controller_shortcuts()
         if not is_popup and self._state.get("is_main_player") != self.is_main_player:
@@ -319,6 +333,12 @@ class JustDanceGameV1(JustDanceGameAbstract):
     async def preprocess_command(self, cmd):
         if not self.is_command_allowed(cmd):
             return None, None
+        if cmd == Command.BACK and self.is_search_opened:
+            return "JD_CancelKeyboard_PhoneCommandData", {}
+        shortcut_command = self._shortcut_commands.get(self._active_ui_layer, {}).get(cmd)
+        if shortcut_command:
+            data = shortcut_command.copy()
+            return data.pop("__class"), data
         __class, data = None, {}
 
         if cmd == Command.PAUSE:
@@ -333,12 +353,6 @@ class JustDanceGameV1(JustDanceGameAbstract):
             self.action_id = (self.action_id + 1) % len(actions)
             __class = "ChangeAction_PhoneCommandData"
             data = {"rowIndex": row_idx, "itemIndex": col_idx, "actionIndex": self.action_id}
-        elif cmd == Command.BACK:
-            if self.is_search_opened:
-                __class = "JD_CancelKeyboard_PhoneCommandData"
-            else:
-                __class = "JD_Custom_PhoneCommandData"
-                data["identifier"] = cmd.value
         elif type(cmd.value) == str:
             __class = "JD_Custom_PhoneCommandData"
             data["identifier"] = cmd.value

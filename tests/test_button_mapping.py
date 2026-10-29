@@ -577,6 +577,101 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+    async def test_v1_shortcuts_send_complete_commands_repeatedly(self):
+        commands = (
+            ("y", {"__class": "JD_Custom_PhoneCommandData", "identifier": Command.UPLOAD.value,
+                   "targetId": 42, "options": {"enabled": False, "ids": [1, 2]}}),
+            ("x", {"__class": "JD_Input_PhoneCommandData", "input": Command.V1_FAVORITE.value,
+                   "targetId": 0}),
+            ("y", {"__class": "JD_TargetedShortcut_PhoneCommandData", "identifier": Command.UPLOAD.value,
+                   "targetId": 7}),
+        )
+        self.game.ws = SimpleNamespace(state=State.OPEN, send=AsyncMock())
+        for button, command in commands:
+            with self.subTest(command=command):
+                setup = menu_setup()
+                setup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": command})}]
+                await self.game.on_message(json.dumps(setup))
+                for _ in range(2):
+                    command_class, data = await self.game.preprocess_command(press(self.controller, button))
+                    await self.game.send_message(command_class, data)
+                    self.assertEqual(json.loads(self.game.ws.send.await_args.args[0]), {"root": command})
+
+    async def test_v1_shortcut_payloads_follow_popup_scope_and_screen_replacement(self):
+        main_command = {"__class": "JD_Custom_PhoneCommandData", "identifier": Command.UPLOAD.value, "targetId": 42}
+        popup_command = {**main_command, "targetId": 7}
+        setup = menu_setup()
+        setup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": main_command})}]
+        await self.game.on_message(json.dumps(setup))
+        popup = menu_setup()
+        popup["isPopup"] = True
+        popup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": popup_command})}]
+        await self.game.on_message(json.dumps(popup))
+        await self.game.on_message(json.dumps({"__class": "JD_PhoneUiSetupData"}))
+        self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (
+            "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value, "targetId": 7},
+        ))
+        await self.game.on_message(json.dumps({"__class": "JD_ClosePopup_ConsoleCommandData"}))
+        self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (
+            "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value, "targetId": 42},
+        ))
+        await self.game.on_message(json.dumps(menu_setup()))
+        self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (None, None))
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiShortcutData", "shortcuts": [{
+                "__class": "JD_PhoneAction_Shortcut", "shortcutType": Command.UPLOAD.value,
+            }],
+        }))
+        self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (
+            "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value},
+        ))
+
+    async def test_v1_disconnect_discards_supplied_shortcut_payloads(self):
+        command = {"__class": "JD_Custom_PhoneCommandData", "identifier": Command.UPLOAD.value, "targetId": 42}
+        setup = menu_setup()
+        setup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": command})}]
+        await self.game.on_message(json.dumps(setup))
+        self.controller.set_accel_collection = Mock()
+        self.controller.set_player_led = AsyncMock()
+        await self.game.disconnect(should_reconnect=False)
+        await self.game.on_message(json.dumps({"__class": "InputSetup_ConsoleCommandData", "isEnabled": True}))
+        await self.game.on_message(json.dumps({
+            "__class": "JD_PhoneUiShortcutData", "shortcuts": [{
+                "__class": "JD_PhoneAction_Shortcut", "shortcutType": Command.UPLOAD.value,
+            }],
+        }))
+        self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (
+            "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value},
+        ))
+
+    async def test_v1_keyboard_cancel_takes_priority_over_back_shortcut(self):
+        command = {"__class": "JD_Custom_PhoneCommandData", "identifier": Command.BACK.value, "targetId": 42}
+        setup = menu_setup()
+        setup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": command})}]
+        await self.game.on_message(json.dumps(setup))
+        self.assertEqual(await self.game.preprocess_command(Command.BACK), (
+            "JD_Custom_PhoneCommandData", {"identifier": Command.BACK.value, "targetId": 42},
+        ))
+        await self.game.on_message(json.dumps({"__class": "JD_OpenPhoneKeyboard_ConsoleCommandData"}))
+        self.assertEqual(await self.game.preprocess_command(Command.BACK), ("JD_CancelKeyboard_PhoneCommandData", {}))
+
+    async def test_v1_invalid_shortcut_payloads_do_not_replace_valid_commands(self):
+        command = {"__class": "JD_Custom_PhoneCommandData", "identifier": Command.UPLOAD.value, "targetId": 42}
+        for invalid in (
+            "invalid JSON", json.dumps({"root": None}), json.dumps({"root": []}),
+            json.dumps({"root": {"identifier": Command.UPLOAD.value}}),
+            json.dumps({"root": {"__class": "", "identifier": Command.UPLOAD.value}}),
+            json.dumps({"root": {"__class": 7, "identifier": Command.UPLOAD.value}}),
+        ):
+            with self.subTest(invalid=invalid):
+                setup = menu_setup()
+                setup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": command})}, {"command": invalid}]
+                with self.assertLogs("joydance", level="ERROR"):
+                    await self.game.on_message(json.dumps(setup))
+                self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (
+                    "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value, "targetId": 42},
+                ))
+
 
 class BufferedButtons:
     events = ButtonEventJoyCon.events
