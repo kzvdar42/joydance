@@ -666,7 +666,7 @@ class GameInputTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(invalid=invalid):
                 setup = menu_setup()
                 setup["setupData"]["shortcuts"] = [{"command": json.dumps({"root": command})}, {"command": invalid}]
-                with self.assertLogs("joydance", level="ERROR"):
+                with self.assertLogs("joydance", level="WARNING"):
                     await self.game.on_message(json.dumps(setup))
                 self.assertEqual(await self.game.preprocess_command(Command.UPLOAD), (
                     "JD_Custom_PhoneCommandData", {"identifier": Command.UPLOAD.value, "targetId": 42},
@@ -820,7 +820,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
                 await game.on_message(json.dumps(initial))
                 replacement = input_collection({"RIGHT": {"__class": "JD_Input_PhoneCommandData", "input": 9}})
                 replacement["availableInput"]["VALID"] = encoded
-                with patch("joydance.games.justdance_v2.logger"):
+                with patch("joydance.games.justdance_abstract.logger"):
                     await game.on_message(json.dumps(replacement))
                 self.assertEqual(await game.preprocess_command(Command.ACCEPT), (None, None))
                 self.assertEqual(await game.preprocess_command(Command.RIGHT), (

@@ -44,6 +44,13 @@ class JustDanceGameV2(JustDanceGameAbstract):
     def is_command_allowed(self, cmd):
         if not super().is_command_allowed(cmd):
             return False
+        if cmd == Command.BACK and self.is_search_opened:
+            return True
+        state = self._input_states[self._active_ui_layer]
+        if cmd in state.button_commands:
+            return state.button_commands[cmd] is not None
+        if cmd in state.shortcut_commands:
+            return state.shortcut_commands[cmd] is not None
         if self._takeover_hold_enabled and cmd == Command.ACCEPT and self._input_commands is None:
             return False
         if self._input_commands is not None and cmd in V2_INPUT_MAPPING_KEYS:
@@ -91,6 +98,58 @@ class JustDanceGameV2(JustDanceGameAbstract):
             return Command.ACCEPT
         return None if cmd == Command.ACCEPT else cmd
 
+    def _parse_shortcuts(self, message, state):
+        state.shortcut_commands = {}
+        state.shortcuts &= {Command.PAUSE}
+        items = message.get("shortcuts", [])
+        items = list(items) if isinstance(items, list) else []
+        if "navigationBar" in message:
+            navigation = message["navigationBar"]
+            navigation = navigation if isinstance(navigation, list) else []
+            back = navigation[0] if navigation else None
+            state.shortcut_commands[Command.BACK] = self._parse_command(back.get("command")) if isinstance(back, dict) else None
+            if back is not None:
+                state.shortcuts.add(Command.BACK)
+            items.extend(navigation[1:])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            command = self._parse_command(item.get("command"))
+            identifier = item.get("shortcutType")
+            if identifier is None and command:
+                identifier = command.get("identifier", command.get("input"))
+            if identifier is None:
+                continue
+            try:
+                cmd = Command(identifier)
+            except (TypeError, ValueError):
+                logger.warning("Unknown V2 shortcut: %s", identifier)
+                continue
+            state.shortcuts.add(cmd)
+            # Metadata-only updates retain legacy bindings; explicit empty commands disable them.
+            if "command" in item:
+                state.shortcut_commands[cmd] = command
+
+    async def parse_phone_setup_data(self, message):
+        await super().parse_phone_setup_data(message)
+        setup = message.get("setupData")
+        if not isinstance(setup, dict):
+            return
+        state = self._input_states[self._active_ui_layer]
+        self._parse_shortcuts(setup, state)
+        self._sync_controller_shortcuts()
+        for cmd, button in (
+            (Command.ACCEPT, setup.get("lobbySetup", {}).get("startButton")),
+            (Command.PAUSE, setup.get("gameplaySetup", {}).get("pauseSlider")),
+        ):
+            if not isinstance(button, dict) or not ("actions" in button or "command" in button):
+                continue
+            actions = button.get("actions")
+            action = actions[0] if isinstance(actions, list) and actions else None
+            if action is None:
+                action = button
+            state.button_commands[cmd] = self._parse_command(action.get("command")) if isinstance(action, dict) else None
+
     def _parse_input_collection(self, message):
         # Discard queued presses so they cannot trigger newly assigned commands.
         self.controller.get_latest_command(commands_to_check=set())
@@ -103,20 +162,9 @@ class JustDanceGameV2(JustDanceGameAbstract):
             available_input = {}
         for cmd, key in V2_INPUT_MAPPING_KEYS.items():
             encoded = available_input.get(key)
-            if encoded is None or encoded == "":
-                continue
-            try:
-                command = json.loads(encoded)["root"]
-                if (
-                    not isinstance(command, dict)
-                    or not isinstance(command.get("__class"), str)
-                    or not command["__class"]
-                ):
-                    raise ValueError("Expected a command object with a class name")
-            except (KeyError, TypeError, ValueError):
-                logger.warning("%s: Invalid input mapping for %s", self.controller.serial, key)
-                continue
-            self._input_commands[cmd] = command
+            command = self._parse_command(encoded)
+            if command is not None:
+                self._input_commands[cmd] = command
 
     async def connect_ws(self):
         try:
@@ -221,6 +269,11 @@ class JustDanceGameV2(JustDanceGameAbstract):
             return None, None
         if cmd == Command.BACK and self.is_search_opened:
             return "JD_CancelKeyboard_PhoneCommandData", {}
+        state = self._input_states[self._active_ui_layer]
+        command = state.button_commands.get(cmd) or state.shortcut_commands.get(cmd)
+        if command:
+            data = command.copy()
+            return data.pop("__class"), data
         if self._input_commands is not None and cmd in V2_INPUT_MAPPING_KEYS:
             data = self._input_commands[cmd].copy()
             return data.pop("__class"), data

@@ -35,6 +35,8 @@ class UiInputState:
     enabled: bool = False
     carousel_enabled: bool = True
     shortcuts: set[Command] = field(default_factory=set)
+    shortcut_commands: dict[Command, dict | None] = field(default_factory=dict)
+    button_commands: dict[Command, dict | None] = field(default_factory=dict)
 
 
 class JustDanceGameAbstract(AbstractGameWrapper, ABC):
@@ -630,6 +632,33 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         layer = UiLayer.POPUP if message.get("applyOnPopup") else UiLayer.MAIN
         self._input_states[layer].enabled = bool(message.get("isEnabled"))
 
+    @staticmethod
+    def _parse_command(encoded):
+        if encoded is None or encoded == "":
+            return None
+        try:
+            command = json.loads(encoded)["root"]
+            if not isinstance(command, dict) or not isinstance(command.get("__class"), str) or not command["__class"]:
+                raise ValueError("Expected a command object with a class name")
+            return command
+        except (KeyError, TypeError, ValueError):
+            logger.warning("Invalid command payload")
+            return None
+
+    def _parse_shortcuts(self, message, state):
+        shortcuts = set()
+        for item in message.get("shortcuts", []):
+            if item["__class"] == "JD_PhoneAction_Shortcut":
+                try:
+                    shortcuts.add(Command(item["shortcutType"]))
+                except (KeyError, ValueError):
+                    logger.warning(
+                        "Unknown or invalid ShortcutType: %s in %s",
+                        item.get("shortcutType"),
+                        item,
+                    )
+        state.shortcuts = shortcuts
+
     async def parse_phone_setup_data(self, message):
         setup_data = message.get("setupData")
         if not isinstance(setup_data, dict):
@@ -744,21 +773,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         elif __class == "JD_PhoneUiShortcutData":
             # Discard queued presses so they cannot trigger newly assigned shortcuts.
             self.controller.get_latest_command(commands_to_check=set())
-            shortcuts = set()
-            for item in message.get("shortcuts", []):
-                if item["__class"] == "JD_PhoneAction_Shortcut":
-                    try:
-                        shortcuts.add(Command(item["shortcutType"]))
-                    except (KeyError, ValueError):
-                        logger.warning(
-                            "Unknown or invalid ShortcutType: %s in %s",
-                            item.get("shortcutType"),
-                            item,
-                        )
             layer = self._active_ui_layer
             if "applyOnPopup" in message:
                 layer = UiLayer.POPUP if message["applyOnPopup"] else UiLayer.MAIN
-            self._input_states[layer].shortcuts = shortcuts
+            self._parse_shortcuts(message, self._input_states[layer])
             self._sync_controller_shortcuts()
         elif __class == "JD_OpenPhoneKeyboard_ConsoleCommandData":
             # Require a fresh press before allowing keyboard cancellation.

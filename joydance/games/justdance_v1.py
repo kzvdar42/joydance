@@ -25,7 +25,6 @@ class JustDanceGameV1(JustDanceGameAbstract):
     def __init__(self, controller, *args, **kwargs):
         super().__init__(controller, *args, **kwargs)
         self.is_main_player = False
-        self._shortcut_commands = {}
         self._carousel_setup = defaultdict(
             lambda: {
                 "row_num": 0,
@@ -44,7 +43,6 @@ class JustDanceGameV1(JustDanceGameAbstract):
     def _reset_input_state(self):
         super()._reset_input_state()
         self.is_main_player = False
-        self._shortcut_commands = {}
         self._state["is_main_player"] = False
 
     @property
@@ -193,13 +191,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
             shortcuts.add(Command.PAUSE)
         for shortcut in shortcuts_data:
             try:
-                command_root = json.loads(shortcut["command"])["root"]
-                if (
-                    not isinstance(command_root, dict)
-                    or not isinstance(command_root.get("__class"), str)
-                    or not command_root["__class"]
-                ):
-                    raise ValueError("Expected a command object with a class name")
+                command_root = self._parse_command(shortcut["command"])
+                if command_root is None:
+                    continue
                 if "identifier" in command_root:
                     command = Command(command_root["identifier"])
                 elif "input" in command_root:
@@ -216,7 +210,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             for item in row.get("items", [])
         ):
             shortcuts.add(Command.NEXT_ACTION)
-        self._shortcut_commands[self._active_ui_layer] = shortcut_commands
+        self._input_states[self._active_ui_layer].shortcut_commands = shortcut_commands
         self.available_shortcuts = shortcuts
         self._sync_controller_shortcuts()
         if not is_popup and self._state.get("is_main_player") != self.is_main_player:
@@ -303,7 +297,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
             return None, None
         if cmd == Command.BACK and self.is_search_opened:
             return "JD_CancelKeyboard_PhoneCommandData", {}
-        shortcut_command = self._shortcut_commands.get(self._active_ui_layer, {}).get(cmd)
+        shortcut_command = self._input_states[self._active_ui_layer].shortcut_commands.get(cmd)
         if shortcut_command:
             data = shortcut_command.copy()
             return data.pop("__class"), data
