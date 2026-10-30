@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from joydance.constants import PairingState
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.utils import GameConnectionError
 
 
 class HolePunchingTests(unittest.IsolatedAsyncioTestCase):
@@ -60,6 +61,29 @@ class HolePunchingTests(unittest.IsolatedAsyncioTestCase):
             self.game.controller.serial, {"state": PairingState.ERROR_HOLE_PUNCHING.value},
         )
 
+    async def test_listener_is_ready_before_notifying_the_pairing_service(self):
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.addCleanup(client.close)
+        client.setblocking(False)
+
+        async def notify():
+            self.assertGreater(self.game.host_port, 0)
+            self.assertEqual(self.game.host_port, self.listener.getsockname()[1])
+            await asyncio.get_running_loop().sock_connect(client, ("127.0.0.1", self.game.host_port))
+
+        await asyncio.wait_for(self.game.hole_punching(on_listening=notify), 1)
+        self.assertIsNotNone(self.game.console_conn)
+        self.assertEqual(self.listener.fileno(), -1)
+
+    async def test_service_rejection_closes_listener_without_becoming_an_accept_error(self):
+        error = GameConnectionError("Pairing request rejected", PairingState.ERROR_PUNCH_PAIRING)
+        with self.assertRaises(GameConnectionError) as caught:
+            await self.game.hole_punching(on_listening=AsyncMock(side_effect=error))
+        self.assertIs(caught.exception, error)
+        self.assertEqual(self.listener.fileno(), -1)
+        self.assertIsNone(self.game.console_conn)
+        self.state_changed.assert_not_awaited()
+
     async def test_stop_cancels_pending_accept_without_reporting_pairing_error(self):
         self.game.requires_punch_pairing = True
         states = []
@@ -81,6 +105,28 @@ class HolePunchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.game.reconnection_task)
         self.assertFalse(self.game._state["connection_requested"])
         self.assertNotIn(PairingState.ERROR_HOLE_PUNCHING.value, states)
+
+    async def test_stop_cancels_pending_notification_and_closes_the_listener(self):
+        self.game.requires_punch_pairing = True
+        notified = asyncio.Event()
+
+        async def notify():
+            notified.set()
+            await asyncio.Event().wait()
+
+        with (
+            patch.object(self.game, "get_access_token", new=AsyncMock()),
+            patch.object(self.game, "send_pairing_code", new=AsyncMock()),
+            patch.object(self.game, "send_initiate_punch_pairing", new=notify),
+            patch.object(self.game, "connect_ws", new=AsyncMock()) as connect,
+        ):
+            task = await self.game.start_pair()
+            await asyncio.wait_for(notified.wait(), 1)
+            self.assertGreater(self.listener.getsockname()[1], 0)
+            await asyncio.wait_for(self.game.disconnect(should_reconnect=False), 1)
+        self.assertTrue(task.cancelled())
+        self.assertEqual(self.listener.fileno(), -1)
+        connect.assert_not_awaited()
 
     async def test_bind_failure_preserves_original_error_and_closes_listener(self):
         self.listener.bind(("127.0.0.1", 0))

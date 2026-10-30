@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import time
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus, NegotiationError
 from websockets.protocol import State
 from joydance.constants import (
     ACCEL_ACQUISITION_FREQ_HZ,
@@ -18,7 +18,11 @@ from joydance.constants import (
     PairingState,
     Command,
     UiLayer,
+    JD_HANDSHAKE_TIMEOUT,
+    JD_MAX_PROTOCOL_VERSION,
+    JD_SERVICE_TIMEOUT,
 )
+from joydance.utils import GameConnectionError
 
 logger = logging.getLogger("joydance")
 
@@ -71,6 +75,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.accel_data = []
         self.ws = None
         self.is_connected = False
+        self._handshake_deadline = None
         self.headers = {
             "Ubi-AppId": UBI_APP_ID,
             "X-SkuId": UBI_SKU_ID,
@@ -154,36 +159,43 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "Content-Type": "application/json",
         }
 
-        async with aiohttp.ClientSession(headers=headers) as session:
+        async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
             async with session.post(
                 "https://public-ubiservices.ubi.com/v1/profiles/sessions",
                 json={},
                 ssl=False,
             ) as resp:
                 if resp.status != 200:
-                    await self.on_state_changed(
-                        {"state": PairingState.ERROR_CONNECTION.value},
+                    raise GameConnectionError(
+                        f"Pairing authentication failed (HTTP {resp.status}).",
+                        PairingState.ERROR_CONNECTION,
+                        should_reconnect=resp.status >= 500 or resp.status in {408, 429},
                     )
-                    raise Exception("ERROR: Couldn't get access token!")
                 json_body = await resp.json()
+                if not isinstance(json_body, dict) or not isinstance(json_body.get("ticket"), str) or not json_body["ticket"]:
+                    raise GameConnectionError("Invalid authentication response from the pairing service.", PairingState.ERROR_CONNECTION)
                 self.headers["Authorization"] = "Ubi_v1 " + json_body["ticket"]
 
     async def send_pairing_code(self):
         url = "https://prod.just-dance.com/sessions/v1/pairing-info"
 
-        async with aiohttp.ClientSession(headers=self.headers) as session:
+        async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
             async with session.get(url, params={"code": self.pairing_code}, ssl=False) as resp:
                 if resp.status != 200:
-                    await self.on_state_changed(
-                        {"state": PairingState.ERROR_INVALID_PAIRING_CODE.value},
+                    invalid_code = resp.status in {400, 404, 410}
+                    raise GameConnectionError(
+                        "Invalid or expired pairing code." if invalid_code else f"Pairing service rejected the request (HTTP {resp.status}).",
+                        PairingState.ERROR_INVALID_PAIRING_CODE if invalid_code else PairingState.ERROR_CONNECTION,
+                        should_reconnect=resp.status >= 500 or resp.status in {408, 429},
                     )
-                    raise Exception("ERROR: Invalid pairing code!")
                 json_body = await resp.json()
+                if not isinstance(json_body, dict) or not isinstance(json_body.get("pairingUrl"), str) or not json_body["pairingUrl"]:
+                    raise GameConnectionError("Invalid console address from the pairing service.", PairingState.ERROR_CONNECTION)
                 self.pairing_url = json_body["pairingUrl"].replace("https://", "wss://")
                 if not self.pairing_url.endswith("/"):
                     self.pairing_url += "/"
                 self.pairing_url += "smartphone"
-                self.tls_certificate = json_body["tlsCertificate"]
+                self.tls_certificate = json_body.get("tlsCertificate")
                 self.requires_punch_pairing = json_body.get("requiresPunchPairing", False)
 
     async def send_initiate_punch_pairing(self):
@@ -194,14 +206,50 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "mobilePort": self.host_port,
         }
 
-        async with aiohttp.ClientSession(headers=self.headers) as session:
-            async with session.post(url, json=json_payload, ssl=False) as resp:
-                body = await resp.text()
-                if body != "OK":
-                    await self.on_state_changed(
-                        {"state": PairingState.ERROR_PUNCH_PAIRING.value},
-                    )
-                    raise Exception("ERROR: Couldn't initiate punch pairing!")
+        try:
+            async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
+                async with session.post(url, json=json_payload, ssl=False) as resp:
+                    body = await resp.text()
+                    if resp.status != 200 or body.strip() != "OK":
+                        raise GameConnectionError(
+                            f"The pairing service could not request a console connection (HTTP {resp.status}).",
+                            PairingState.ERROR_PUNCH_PAIRING,
+                            should_reconnect=resp.status >= 500 or resp.status in {408, 429},
+                        )
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise GameConnectionError(
+                f"Could not request the console connection: {str(error) or 'request timed out'}.",
+                PairingState.ERROR_PUNCH_PAIRING,
+            ) from error
+
+    async def _handle_connection_error(self, error):
+        if isinstance(error, GameConnectionError):
+            state = error.state
+            should_reconnect = self.should_reconnect and error.should_reconnect
+        else:
+            current_state = self._state.get("state")
+            state = PairingState.ERROR_CONSOLE_CONNECTION
+            if current_state in {PairingState.GETTING_TOKEN.value, PairingState.PAIRING.value}:
+                state = PairingState.ERROR_CONNECTION
+            elif current_state is not None and current_state >= PairingState.ERROR_CONTROLLER.value:
+                state = PairingState(current_state)
+            should_reconnect = self.should_reconnect
+        details = str(error) or ("Pairing service request timed out." if state is PairingState.ERROR_CONNECTION else "Game connection timed out.")
+        if isinstance(error, InvalidStatus):
+            status = error.response.status_code
+            details = f"The game rejected the WebSocket connection (HTTP {status})."
+            should_reconnect = should_reconnect and (status >= 500 or status in {408, 429})
+        elif isinstance(error, NegotiationError):
+            details = "Game protocol negotiation failed. Check the selected pairing method."
+            should_reconnect = False
+        elif isinstance(error, ConnectionClosed):
+            if error.rcvd is not None and error.rcvd.code == 4004:
+                details = f"The game rejected this controller (code 4004): {error.rcvd.reason or 'no reason supplied'}."
+                should_reconnect = False
+            elif error.sent is not None and error.sent.reason == "keepalive ping timeout":
+                details = "Game connection lost: no response to keepalive checks."
+        logger.warning("%s: %s", self.controller.serial, details)
+        await self.disconnect(should_reconnect=should_reconnect, error_state={"state": state.value, "error_details": details})
 
     async def send_message(self, __class, data={}):
         if __class != "JD_PhoneScoringData":
@@ -215,22 +263,16 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         try:
             if self._websocket_is_open(self.ws):
                 await self.ws.send(json.dumps(msg, separators=(",", ":")))
+                return True
             else:
                 logger.warning(
                     "%s: WebSocket is not connected or closed. Cannot send message: %s",
                     self.controller.serial,
                     __class,
                 )
-        except ConnectionClosed:
-            logger.warning(
-                "%s: Attempted to send message on a closed WebSocket: %s",
-                self.controller.serial,
-                __class,
-            )
-            await self.disconnect()
-        except Exception:
-            logger.exception("%s: Error sending message: %s", self.controller.serial, __class)
-            await self.disconnect()
+        except Exception as error:
+            await self._handle_connection_error(error)
+        return False
 
     async def collect_accelerometer_data(self):
         if not self.is_connected:
@@ -278,9 +320,9 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 break
             tmp_duration = target_duration - dt
 
-    @abstractmethod
     async def _message_receive_loop(self):
-        raise NotImplementedError
+        async for message_str in self.ws:
+            await self.on_message(message_str)
 
     async def tick(self):
         sleep_duration = FRAME_DURATION
@@ -300,6 +342,8 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 return
             # Break if game is not connected
             if not self.is_connected:
+                if self._handshake_deadline is not None and asyncio.get_running_loop().time() >= self._handshake_deadline:
+                    raise GameConnectionError(f"The game did not finish the handshake within {JD_HANDSHAKE_TIMEOUT} seconds.")
                 await asyncio.sleep(sleep_duration)
                 continue
             if not self.should_start_accelerometer:
@@ -322,6 +366,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         await self.send_message(
             "JD_PhoneDataCmdHandshakeHello",
             {
+                "clientVersion": "0.1",
                 "accelAcquisitionFreqHz": float(self.accel_acquisition_freq_hz),
                 "accelAcquisitionLatency": float(self.accel_acquisition_latency),
                 "accelMaxRange": float(self.accel_max_range),
@@ -367,17 +412,21 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             logger.debug("%s: Pairing task cancelled.", self.controller.serial)
 
     async def run_connection_tasks(self):
-        await self.send_hello()
-        if not self._websocket_is_open(self.ws):
-            return
-
-        tasks = {
-            asyncio.create_task(self._message_receive_loop()),
-            asyncio.create_task(self.tick()),
-            asyncio.create_task(self.send_command()),
-        }
-
+        tasks = set()
+        self._handshake_deadline = asyncio.get_running_loop().time() + JD_HANDSHAKE_TIMEOUT
         try:
+            try:
+                async with asyncio.timeout_at(self._handshake_deadline):
+                    await self.send_hello()
+            except TimeoutError as error:
+                raise GameConnectionError(f"The game did not finish the handshake within {JD_HANDSHAKE_TIMEOUT} seconds.") from error
+            if not self._websocket_is_open(self.ws):
+                return
+            tasks = {
+                asyncio.create_task(self._message_receive_loop()),
+                asyncio.create_task(self.tick()),
+                asyncio.create_task(self.send_command()),
+            }
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
             for task in pending:
@@ -389,6 +438,12 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 task.result()
 
             if self.ws:
+                close_code = getattr(self.ws, "close_code", None)
+                if close_code is not None:
+                    raise GameConnectionError(
+                        f"The game closed the connection (code {close_code}): {self.ws.close_reason or 'no reason supplied'}.",
+                        should_reconnect=close_code != 4004,
+                    )
                 await self.disconnect(should_reconnect=self.should_reconnect)
         finally:
             for task in tasks:
@@ -409,12 +464,14 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    async def disconnect(self, should_reconnect = True):
+    async def disconnect(self, should_reconnect=True, error_state=None):
         self.should_reconnect = should_reconnect
         self._state["connection_requested"] = should_reconnect
         if not should_reconnect:
             await self.stop_reconnection()
-            await self.stop_pair()
+            # An error may come from a worker owned by pair_task; closing its socket stops that task.
+            if error_state is None:
+                await self.stop_pair()
 
         was_connected = self.is_connected
         old_ws = self.ws
@@ -422,6 +479,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         old_console_conn, self.console_conn = self.console_conn, None
         had_ws = old_ws is not None
         self.is_connected = False
+        self._handshake_deadline = None
         # A new connection may open a pause menu without repeating the stop-scoring message.
         self.should_start_accelerometer = False
         self.controller.set_accel_collection(False)
@@ -429,16 +487,15 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self._sync_controller_shortcuts()
         self.accel_data.clear()
 
-        if (
+        start_reconnecting = (
             self.should_reconnect
             and not self.reconnection_task
-            and (was_connected or had_ws or not self.controller.is_connected())
-        ):
-            self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
+            and (was_connected or had_ws or error_state is not None or not self.controller.is_connected())
+        )
 
         # Finish closing and notifying even if the owning connection loop is cancelled.
         cleanup = asyncio.create_task(
-            self._finish_disconnect(old_ws, was_connected or not should_reconnect, old_console_conn)
+            self._finish_disconnect(old_ws, was_connected or not should_reconnect, old_console_conn, error_state)
         )
         cancelled = False
         while not cleanup.done():
@@ -447,10 +504,12 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             except asyncio.CancelledError:
                 cancelled = True
         cleanup.result()
+        if start_reconnecting and self.should_reconnect and not self.reconnection_task:
+            self.reconnection_task = asyncio.create_task(self.attempt_reconnect())
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _finish_disconnect(self, old_ws, notify_disconnected, old_console_conn):
+    async def _finish_disconnect(self, old_ws, notify_disconnected, old_console_conn, error_state=None):
         try:
             if old_ws is not None and old_ws.state is not State.CLOSED:
                 await old_ws.close()
@@ -461,10 +520,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             was_connecting = await self._stop_connecting_led()
             if notify_disconnected or was_connecting:
                 await self.controller.set_player_led(0, flash=True)
-            if notify_disconnected:
+            if notify_disconnected or error_state is not None:
                 logger.debug("%s: Disconnected", self.controller.serial)
                 await self.on_state_changed(
-                    {"state": PairingState.DISCONNECTED.value}
+                    error_state if error_state is not None else {"state": PairingState.DISCONNECTED.value}
                 )
 
     async def attempt_reconnect(self):
@@ -576,7 +635,17 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             )
 
         if __class == "JD_PhoneDataCmdHandshakeContinue":
+            protocol_version = message.get("protocolVersion")
+            if protocol_version is not None and (
+                type(protocol_version) is not int or not 0 <= protocol_version <= JD_MAX_PROTOCOL_VERSION
+            ):
+                raise GameConnectionError(
+                    f"Unsupported game protocol version: {protocol_version}. JoyDance supports versions through {JD_MAX_PROTOCOL_VERSION}.",
+                    should_reconnect=False,
+                )
             await self.send_message("JD_PhoneDataCmdSync", {"phoneID": message["phoneID"]})
+        elif __class == "JD2015_NotPhoneScoring":
+            raise GameConnectionError("Phone scoring is not available in this game session.", should_reconnect=False)
         elif __class == "JD_ProfilePhoneUiData":
             previous_player_id = self.profile_data.get("player_id")
             await self.parse_profile_data(message)
@@ -591,12 +660,12 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             await self._stop_rumble()
             self._rumble_task = asyncio.create_task(self._play_rumble(sound_index))
         elif __class == "JD_PhoneDataCmdSyncEnd":
-            await self.send_message("JD_PhoneDataCmdSyncEnd", {"phoneID": message["phoneID"]})
-            self.is_connected = True
-            await self.on_state_changed(
-                {"state": PairingState.CONNECTED.value}
-            )
-            await self.on_state_changed({"state": PairingState.CONNECTED.value})
+            if not await self.send_message("JD_PhoneDataCmdSyncEnd", {"phoneID": message["phoneID"]}):
+                return
+            self._handshake_deadline = None
+            if not self.is_connected:
+                self.is_connected = True
+                await self.on_state_changed({"state": PairingState.CONNECTED.value, "error_details": None})
         elif __class == "JD_EnableAccelValuesSending_ConsoleCommandData":
             self._scoring_session_id += 1
             self.accel_data.clear()

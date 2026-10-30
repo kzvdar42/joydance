@@ -281,12 +281,12 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         game_class.__module__ + ".connect",
                         side_effect=ConnectionRefusedError("Game is closed"),
                     ),
-                    patch.object(game, "disconnect", new=AsyncMock()),
+                    patch.object(game, "disconnect", new=AsyncMock()) as disconnect,
                     patch(game_class.__module__ + ".logger"),
                 ):
                     await game.connect_ws()
                 self.assertEqual(
-                    game._state["state"], PairingState.ERROR_CONSOLE_CONNECTION.value
+                    disconnect.await_args.kwargs["error_state"]["state"], PairingState.ERROR_CONSOLE_CONNECTION.value
                 )
 
     async def test_queued_connections_share_success_or_stop_safely(self):

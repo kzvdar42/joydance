@@ -9,6 +9,7 @@ import dance
 from joydance.config_handler import ConfigHandler
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.utils import GameConnectionError
 from websockets.protocol import State
 
 
@@ -57,7 +58,7 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
         browsers = [Mock(closed=False, send_json=AsyncMock()) for _ in range(2)]
         self.app["websockets"].update(browsers)
         for method in ("old", "fast"):
-            for reason in ("popup", "replacement", "manual_disconnect", "connection_loss"):
+            for reason in ("popup", "replacement", "manual_disconnect", "connection_loss", "connection_error"):
                 with self.subTest(protocol=method, reason=reason):
                     data = {**self.data, "pairing_method": method}
                     await dance.connect_controller(self.app, self.ws, data)
@@ -89,6 +90,8 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
                             }))
                         elif reason == "manual_disconnect":
                             await dance.disconnect_controller(self.app, self.ws, data)
+                        elif reason == "connection_error":
+                            await game._handle_connection_error(GameConnectionError("Game connection timed out"))
                         else:
                             await game.disconnect(should_reconnect=True)
                         self.assertFalse(game.is_search_opened)

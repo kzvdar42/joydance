@@ -4,7 +4,6 @@ import time
 from urllib.parse import urlparse
 import ssl
 from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed
 
 from joydance.constants import (
     Command,
@@ -13,6 +12,8 @@ from joydance.constants import (
     WsSubprotocolVersion,
     V2_INPUT_MAPPING_KEYS,
     V2_TAKEOVER_HOLD_DURATION,
+    JD_PING_INTERVAL,
+    JD_PING_TIMEOUT,
 )
 from .justdance_abstract import JustDanceGameAbstract
 
@@ -153,55 +154,22 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 subprotocols=[subprotocol],
                 sock=self.console_conn,
                 ssl=ssl_context,
-                ping_timeout=None,
+                ping_interval=JD_PING_INTERVAL,
+                ping_timeout=JD_PING_TIMEOUT,
                 max_size=None,  # Disable message size limit to handle large JD_PhoneUiSetupData messages
                 server_hostname=server_hostname,
                 proxy=None,
             ) as websocket:
                 self.ws = websocket
-                # Set state only on JD_PhoneDataCmdHandshakeContinue response
+                # The game connection is ready only after SyncEnd.
                 await self.run_connection_tasks()
 
-        except ConnectionClosed as e:
-            logger.warning("%s: V2 WebSocket connection closed: %s", self.controller.serial, e)
-            await self.on_state_changed(
-                {
-                    "state": PairingState.ERROR_CONSOLE_CONNECTION.value,
-                    "error_details": str(e),
-                },
-            )
-            await self.disconnect()
-        except ConnectionRefusedError as e:
-            logger.error("%s: V2 Connection refused for %s: %s", self.controller.serial, self.pairing_url, e)
-            await self.on_state_changed(
-                {"state": PairingState.ERROR_CONSOLE_CONNECTION.value, "error_details": str(e)},
-            )
-            await self.disconnect()
         except Exception as e:
             logger.exception(
                 "%s: V2 An error occurred while connecting WebSocket to console.",
                 self.controller.serial,
             )
-            await self.on_state_changed(
-                {
-                    "state": PairingState.ERROR_CONSOLE_CONNECTION.value,
-                    "error_details": str(e),
-                },
-            )
-            await self.disconnect()
-
-    async def _message_receive_loop(self):
-        try:
-            async for message_str in self.ws:
-                await self.on_message(message_str)
-        except ConnectionClosed:
-            logger.info(
-                "%s: V2 WebSocket connection closed while receiving messages.",
-                self.controller.serial,
-            )
-        except Exception as e:
-            logger.exception("%s: V2 Error in message receive loop.", self.controller.serial)
-            await self.disconnect()
+            await self._handle_connection_error(e)
 
     async def pair(self):
         try:
@@ -245,13 +213,12 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 )
                 logger.debug("%s: V2 Connecting with console...", self.controller.serial)
                 if self.requires_punch_pairing:
-                    await self.send_initiate_punch_pairing()
-                    await self.hole_punching()
+                    await self.hole_punching(on_listening=self.send_initiate_punch_pairing)
 
             await self.connect_ws()
-        except Exception:
-            await self.disconnect()
+        except Exception as error:
             logger.exception("%s: V2 An error occurred while pairing.", self.controller.serial)
+            await self._handle_connection_error(error)
 
     async def preprocess_command(self, cmd):
         if not self.is_command_allowed(cmd):

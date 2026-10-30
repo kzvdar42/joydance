@@ -65,7 +65,8 @@ async def connect_controller(app, ws, data) -> None:
         try:
             app["controllers_info"][serial].update(update_dict)
             await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
-            if update_dict.get("state") == PairingState.DISCONNECTED.value:
+            state = update_dict.get("state")
+            if state is not None and (state == PairingState.DISCONNECTED.value or state >= PairingState.ERROR_CONTROLLER.value):
                 await ws_broadcast_response(app, WsCommand.HIDE_SEARCH, {"serial": serial})
         except Exception as e:
             logger.error("Error in on_joydance_state_changed: %s", e, exc_info=True)

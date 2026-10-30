@@ -4,6 +4,13 @@ JOYDANCE_VERSION = "0.6.0-beta3"
 UBI_APP_ID = "210da0fb-d6a5-4ed1-9808-01e86f0de7fb"
 UBI_SKU_ID = "jdcompanion-android"
 
+# Controller app 7.1.0 uses a 15-second connection timer and supports protocols through 5.
+JD_HANDSHAKE_TIMEOUT = 15
+JD_MAX_PROTOCOL_VERSION = 5
+JD_SERVICE_TIMEOUT = 15
+JD_PING_INTERVAL = 5
+JD_PING_TIMEOUT = 10
+
 
 class PairingState(Enum):
     IDLE = 0

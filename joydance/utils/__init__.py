@@ -1,3 +1,3 @@
-from joydance.utils.errors import ControllerConnectionError
+from joydance.utils.errors import ControllerConnectionError, GameConnectionError
 
-__all__ = ["ControllerConnectionError"]
+__all__ = ["ControllerConnectionError", "GameConnectionError"]

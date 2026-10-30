@@ -5,6 +5,7 @@ import socket
 import logging
 
 from joydance.constants import PairingState
+from joydance.utils import GameConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -45,18 +46,23 @@ class AbstractGameWrapper(ABC):
         """Randomize a port number, to be used in hole_punching() later"""
         return random.randrange(39000, 39999)
 
-    async def hole_punching(self):
+    async def hole_punching(self, on_listening=None):
         """Open a port on this machine so the console can connect to it."""
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
                 conn.setblocking(False)
                 conn.bind(("0.0.0.0", self.host_port))
                 conn.listen(5)
+                self.host_port = conn.getsockname()[1]
+                if on_listening is not None:
+                    await on_listening()
 
                 # Accept incoming connection from console
                 async with asyncio.timeout(10):
                     self.console_conn, addr = await asyncio.get_running_loop().sock_accept(conn)
             logger.debug("Accepted connection from %s:%s", addr[0], addr[1])
+        except GameConnectionError:
+            raise
         except Exception:
             await self.on_state_changed(
                 {"state": PairingState.ERROR_HOLE_PUNCHING.value},

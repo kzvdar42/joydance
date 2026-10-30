@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- Serve this file at /tests/test_connection_ui.html with static/ mounted at / to run the check. -->
+<html><head><script src="/js/mitt.umd.js"></script><title>Connection error regression check</title></head>
+<body><script type="module">
+import { render } from '/js/preact.module.js';
+import { html } from '/js/utils.js';
+import { Controllers } from '/js/components/controller.js';
+
+window.mitty = mitt();
+const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+const controller = {serial:'test',name:'JoyCon R',controller_type:'joycon_right',color:'#ef483e',battery_level:4};
+const update = data => window.mitty.emit('resp_update_controller_state', {...controller,...data});
+
+try {
+    render(html`<${Controllers} controllers=${[{...controller,state:106,connection_requested:true,error_details:'The game did not finish the handshake within 15 seconds.'}]} />`, document.body);
+    await settle();
+    check(document.querySelector('.controller-state').textContent.includes('handshake'), 'The connection error reason must be visible');
+    check(document.querySelector('.button-group') === null && document.querySelector('.controllers-list button').textContent === 'Stop', 'Retrying connections must remain stoppable');
+    update({state:103,connection_requested:false,error_details:'Invalid or expired pairing code.'});
+    await settle();
+    check(document.querySelector('.controller-state').textContent === 'Invalid or expired pairing code.', 'Invalid codes must retain their own explanation');
+    check(document.querySelector('.controllers-list button').textContent === 'Connect', 'Permanent failures must allow a fresh connection');
+    update({state:4,connection_requested:true,error_details:null});
+    await settle();
+    check(document.querySelector('.controller-state').textContent === 'Connected!', 'Successful recovery must clear the old error');
+    check(document.querySelector('.button-group button').textContent === 'Disconnect', 'The recovered controller must show its normal controls');
+    document.body.prepend(Object.assign(document.createElement('p'), {id:'result',textContent:'PASS: connection errors show their reasons, retries can be stopped, and recovery clears old errors.'}));
+} catch (error) {
+    document.body.prepend(Object.assign(document.createElement('pre'), {id:'result',textContent:'FAIL: ' + error.stack}));
+    throw error;
+}
+</script></body></html>

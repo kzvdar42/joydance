@@ -104,9 +104,10 @@ class Controller extends Component {
     }
 
     render(props, { controller }) {
-        const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message, is_main_player } = controller
+        const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message, is_main_player, error_details } = controller
         const controllerState = state
-        const stateMessage = PairingStateMessage[controllerState]
+        const stateMessage = controllerState >= PairingState.ERROR_CONTROLLER && error_details
+            ? error_details : PairingStateMessage[controllerState]
 
         const batteryLevel = BATTERY_LEVEL[battery_level]
 
