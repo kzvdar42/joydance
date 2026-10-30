@@ -132,6 +132,8 @@ pip3 install -r requirements.txt
       - Starts with `192.168.` or `10.`.
     - **Pairing Code**: get this from the game.
 
+    - **JDMO 2021**: select **JDMO 2021: Pairing code** under Mods, enter the code shown by the game, and use the IP address of the computer running JoyDance as Host Private IP. This uses JDMO's pairing service and follows the connection address returned by it.
+
 7. Press the "Connect" button next to Joy-Con to start the pairing process.
 
 8. 💃🕺

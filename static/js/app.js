@@ -6,7 +6,7 @@ import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
 import { Controllers } from '/js/components/controller.js';
-import { PairingMethod, WsCommand, IpAddressRegex } from '/js/consts.js';
+import { WsCommand, IpAddressRegex, usesHostAddress, usesPairingCode } from '/js/consts.js';
 
 window.mitty = mitt()
 
@@ -81,14 +81,14 @@ class App extends Component {
     requestConnectController(serial) {
         const state = this.state
         const pairing_method = state.pairing_method
-        let addr = pairing_method == PairingMethod.DEFAULT ? state.host_ip_addr : state.console_ip_addr
+        const addr = usesHostAddress(pairing_method) ? state.host_ip_addr : state.console_ip_addr
         if (!addr.match(IpAddressRegex.JS_PATTERN)) {
             alert('ERROR: Invalid IP address!')
             document.getElementById('ipAddr').focus()
             return
         }
 
-        if (pairing_method == PairingMethod.DEFAULT) {
+        if (usesPairingCode(pairing_method)) {
             const pairing_code = state.pairing_code
             if (!pairing_code.match(/^\d{6}$/)) {
                 alert('ERROR: Invalid pairing code!')
@@ -200,7 +200,7 @@ class App extends Component {
     }
 
     handleAddrChange(addr) {
-        const key = this.state.pairing_method == PairingMethod.DEFAULT ? 'host_ip_addr' : 'console_ip_addr'
+        const key = usesHostAddress(this.state.pairing_method) ? 'host_ip_addr' : 'console_ip_addr'
         this.setState({
             [key]: addr,
         })

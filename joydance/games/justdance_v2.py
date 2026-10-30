@@ -8,6 +8,7 @@ from websockets.asyncio.client import connect
 from joydance.constants import (
     Command,
     PairingState,
+    PairingMethod,
     WS_SUBPROTOCOLS,
     WsSubprotocolVersion,
     V2_INPUT_MAPPING_KEYS,
@@ -118,34 +119,28 @@ class JustDanceGameV2(JustDanceGameAbstract):
             self._input_commands[cmd] = command
 
     async def connect_ws(self):
-        server_hostname = None
-        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ssl_context.set_ciphers("ALL")
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-
-        if self.tls_certificate:
-            try:
-                ssl_context.load_verify_locations(cadata=self.tls_certificate)
-            except Exception as e:
-                logger.error("%s: V2 Failed to load TLS certificate: %s", self.controller.serial, e)
-
-        # TODO: handle other private IPs
-        if self.pairing_url.startswith("wss://192.168.") or self.pairing_url.startswith("wss://10."):
-            if self.console_conn:
-                server_hostname = self.console_conn.getpeername()[0]
-
-        if not server_hostname:
-            try:
-                tmp = urlparse(self.pairing_url)
-                server_hostname = tmp.hostname
-            except Exception as e:
-                logger.error(
-                    f"{self.controller.serial}: V2 Error parsing server_hostname from {self.pairing_url}: {e}"
-                )
-
-        subprotocol = WS_SUBPROTOCOLS[WsSubprotocolVersion.V2.value]
         try:
+            uri = urlparse(self.pairing_url)
+            server_hostname = None
+            ssl_context = None
+            if uri.scheme == "wss":
+                ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                ssl_context.set_ciphers("ALL")
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+
+                if self.tls_certificate:
+                    try:
+                        ssl_context.load_verify_locations(cadata=self.tls_certificate)
+                    except Exception as e:
+                        logger.error("%s: V2 Failed to load TLS certificate: %s", self.controller.serial, e)
+
+                server_hostname = uri.hostname
+                # TODO: handle other private IPs
+                if self.console_conn and server_hostname and server_hostname.startswith(("192.168.", "10.")):
+                    server_hostname = self.console_conn.getpeername()[0]
+
+            subprotocol = WS_SUBPROTOCOLS[WsSubprotocolVersion.V2.value]
             logger.debug(
                 f"{self.controller.serial}: V2 connecting to {self.pairing_url} with subprotocol {subprotocol}, server_hostname: {server_hostname}"
             )
@@ -196,11 +191,12 @@ class JustDanceGameV2(JustDanceGameAbstract):
                         )
                     await self.hole_punching()
             else:
-                await self.on_state_changed(
-                    {"state": PairingState.GETTING_TOKEN.value}
-                )
-                logger.debug("%s: V2 Getting authorization token...", self.controller.serial)
-                await self.get_access_token()
+                if self.pairing_method != PairingMethod.JDMO.value:
+                    await self.on_state_changed(
+                        {"state": PairingState.GETTING_TOKEN.value}
+                    )
+                    logger.debug("%s: V2 Getting authorization token...", self.controller.serial)
+                    await self.get_access_token()
 
                 await self.on_state_changed(
                     {"state": PairingState.PAIRING.value}

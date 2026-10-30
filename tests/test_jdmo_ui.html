@@ -1,0 +1,65 @@
+<!doctype html>
+<!-- Serve this file at /tests/test_jdmo_ui.html with static/ mounted at /. Uses no live WebSocket or hardware. -->
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
+<script src="/js/mitt.umd.js"></script><title>JDMO pairing regression check</title></head>
+<body><script type="module">
+import { WsCommand, usesHostAddress, usesPairingCode } from '/js/consts.js';
+
+window.CONFIG = {pairing_method:'jdmo',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'012345'};
+window.VERSION = 'JDMO pairing preview';
+const sent = [], alerts = [];
+window.alert = message => alerts.push(message);
+window.WebSocket = class {
+    static OPEN = 1;
+    static CLOSED = 3;
+    constructor() { this.readyState = 1; window.testSocket = this; }
+    send(message) { sent.push(JSON.parse(message)); }
+};
+const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+const change = async (selector, value) => {
+    const field = document.querySelector(selector);
+    field.value = value;
+    field.dispatchEvent(new Event('change', {bubbles:true}));
+    await settle();
+};
+const connect = async () => { window.mitty.emit('req_' + WsCommand.CONNECT_CONTROLLER, 'test'); await settle(); };
+
+try {
+    for (const [method, host, code] of [['default',true,true],['fast',false,false],['stadia',false,true],['old',false,false],['jdmo',true,true]]) {
+        check(usesHostAddress(method) === host && usesPairingCode(method) === code, 'Pairing requirements changed for ' + method);
+    }
+    await import('/js/app.js');
+    await settle();
+    check(document.querySelector('option[value="jdmo"]')?.textContent.includes('JDMO 2021'), 'JDMO must be selectable');
+    check(document.querySelector('#stacked-state').value === 'jdmo', 'Saved JDMO selection must be restored');
+    check(document.querySelector('#ipAddr').value === '192.168.1.2', 'JDMO must use the host address');
+    check(!document.querySelector('#pairingCode').readOnly, 'JDMO must allow entering a code');
+    await change('#ipAddr', '192.168.1.9');
+    await connect();
+    const request = sent.at(-1);
+    check(request.cmd === WsCommand.CONNECT_CONTROLLER, 'Connect request is missing');
+    check(request.data.pairing_method === 'jdmo' && request.data.pairing_code === '012345', 'JDMO method and code must reach the backend');
+    check(request.data.host_ip_addr === '192.168.1.9' && request.data.console_ip_addr === '192.168.1.3', 'Editing host must preserve console address');
+    await change('#pairingCode', '12');
+    const count = sent.length;
+    await connect();
+    check(alerts.length === 1 && sent.length === count, 'Invalid JDMO codes must be blocked');
+    await change('#pairingCode', '012345');
+    await change('#stacked-state', 'fast');
+    check(document.querySelector('#ipAddr').value === '192.168.1.3', 'Fast mode must keep the console address');
+    check(document.querySelector('#pairingCode').readOnly, 'Fast mode must not require a code');
+    await change('#stacked-state', 'jdmo');
+    check(document.querySelector('#ipAddr').value === '192.168.1.9', 'Switching methods must preserve the host address');
+    check(document.querySelector('#pairingCode').value === '012345', 'Switching methods must preserve the code');
+    window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_get_controller_list',data:[{
+        serial:'test',name:'Pro Controller',controller_type:'pro_controller',color:'#383638',color_buttons:'#222',state:0,battery_level:4,
+    }]})});
+    await settle();
+    document.body.prepend(Object.assign(document.createElement('p'), {id:'result',textContent:'PASS: JDMO selection, host address, code validation and connection request.'}));
+} catch (error) {
+    document.body.prepend(Object.assign(document.createElement('pre'), {id:'result',textContent:'FAIL: ' + error.stack}));
+    throw error;
+}
+</script></body></html>

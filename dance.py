@@ -110,7 +110,7 @@ async def connect_controller(app, ws, data) -> None:
             config["console_ip_addr"] = console_ip_addr
             app["config_handler"].data = config
 
-            if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
+            if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value, PairingMethod.JDMO.value}:
                 app["controllers_info"][serial]["pairing_code"] = pairing_code
                 console_ip_addr = None
             else:
@@ -129,6 +129,7 @@ async def connect_controller(app, ws, data) -> None:
                 console_ip_addr=console_ip_addr,
                 on_state_changed=on_joydance_state_changed,
                 on_game_message=on_game_message,
+                pairing_method=pairing_method,
             )
 
             previous_connection = app["joydance_connections"].get(serial)

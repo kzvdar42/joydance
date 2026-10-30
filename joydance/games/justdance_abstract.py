@@ -6,6 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import time
+from urllib.parse import urlparse
 from websockets.exceptions import ConnectionClosed, InvalidStatus, NegotiationError
 from websockets.protocol import State
 from joydance.constants import (
@@ -15,6 +16,8 @@ from joydance.constants import (
     FRAME_DURATION,
     UBI_APP_ID,
     UBI_SKU_ID,
+    JDMO_PAIRING_URL,
+    PairingMethod,
     PairingState,
     Command,
     UiLayer,
@@ -56,10 +59,12 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         accel_max_range=ACCEL_MAX_RANGE,
         on_state_changed=None,
         on_game_message=None,
+        pairing_method=PairingMethod.DEFAULT.value,
     ):
         super().__init__(on_state_changed, on_game_message)
         self.controller = controller
         self.pairing_code = pairing_code
+        self.pairing_method = pairing_method
         self.host_ip_addr = host_ip_addr
         self.console_ip_addr = console_ip_addr
         self.tls_certificate = None
@@ -177,26 +182,65 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 self.headers["Authorization"] = "Ubi_v1 " + json_body["ticket"]
 
     async def send_pairing_code(self):
-        url = "https://prod.just-dance.com/sessions/v1/pairing-info"
+        if self.pairing_method == PairingMethod.JDMO.value:
+            json_body = await self._request_jdmo_pairing("pairing-info")
+        else:
+            url = "https://prod.just-dance.com/sessions/v1/pairing-info"
+            async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
+                async with session.get(url, params={"code": self.pairing_code}, ssl=False) as resp:
+                    if resp.status != 200:
+                        invalid_code = resp.status in {400, 404, 410}
+                        raise GameConnectionError(
+                            "Invalid or expired pairing code." if invalid_code else f"Pairing service rejected the request (HTTP {resp.status}).",
+                            PairingState.ERROR_INVALID_PAIRING_CODE if invalid_code else PairingState.ERROR_CONNECTION,
+                            should_reconnect=resp.status >= 500 or resp.status in {408, 429},
+                        )
+                    json_body = await resp.json()
+        if not isinstance(json_body, dict) or not isinstance(json_body.get("pairingUrl"), str):
+            raise GameConnectionError("Invalid console address from the pairing service.", PairingState.ERROR_CONNECTION)
+        try:
+            uri = urlparse(json_body["pairingUrl"])
+            if uri.scheme not in {"http", "https", "ws", "wss"} or not uri.hostname or uri.username or uri.password or uri.fragment:
+                raise ValueError("Invalid pairing URL")
+            uri.port  # Validate the port before passing the address to websockets.
+        except ValueError as error:
+            raise GameConnectionError("Invalid console address from the pairing service.", PairingState.ERROR_CONNECTION) from error
+        path = uri.path.rstrip("/")
+        if not path.endswith("/smartphone"):
+            path += "/smartphone"
+        self.pairing_url = uri._replace(scheme={"http": "ws", "https": "wss"}.get(uri.scheme, uri.scheme), path=path).geturl()
+        self.tls_certificate = json_body.get("tlsCertificate")
+        self.requires_punch_pairing = json_body.get("requiresPunchPairing", False) in (True, 1, "1", "true")
 
-        async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
-            async with session.get(url, params={"code": self.pairing_code}, ssl=False) as resp:
-                if resp.status != 200:
-                    invalid_code = resp.status in {400, 404, 410}
-                    raise GameConnectionError(
-                        "Invalid or expired pairing code." if invalid_code else f"Pairing service rejected the request (HTTP {resp.status}).",
-                        PairingState.ERROR_INVALID_PAIRING_CODE if invalid_code else PairingState.ERROR_CONNECTION,
-                        should_reconnect=resp.status >= 500 or resp.status in {408, 429},
-                    )
-                json_body = await resp.json()
-                if not isinstance(json_body, dict) or not isinstance(json_body.get("pairingUrl"), str) or not json_body["pairingUrl"]:
-                    raise GameConnectionError("Invalid console address from the pairing service.", PairingState.ERROR_CONNECTION)
-                self.pairing_url = json_body["pairingUrl"].replace("https://", "wss://")
-                if not self.pairing_url.endswith("/"):
-                    self.pairing_url += "/"
-                self.pairing_url += "smartphone"
-                self.tls_certificate = json_body.get("tlsCertificate")
-                self.requires_punch_pairing = json_body.get("requiresPunchPairing", False)
+    async def _request_jdmo_pairing(self, path, payload=None):
+        is_punch = payload is not None
+        state = PairingState.ERROR_PUNCH_PAIRING if is_punch else PairingState.ERROR_CONNECTION
+        try:
+            async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
+                for version in (1, 2):
+                    url = f"{JDMO_PAIRING_URL}/v{version}/{path}"
+                    async with session.request(
+                        "POST" if is_punch else "GET", url,
+                        params=None if is_punch else {"code": self.pairing_code}, json=payload,
+                    ) as resp:
+                        body = await resp.text()
+                        try:
+                            data = json.loads(body)
+                        except ValueError:
+                            data = body
+                        # The JDMO app retries v2 only when v1 has no route, not for invalid-code JSON errors.
+                        if version == 1 and resp.status in {404, 405} and (data is None or isinstance(data, str)):
+                            continue
+                        if not 200 <= resp.status < 300:
+                            invalid_code = not is_punch and resp.status in {400, 404, 410}
+                            raise GameConnectionError(
+                                "Invalid or expired pairing code." if invalid_code else f"JDMO pairing service rejected the request (HTTP {resp.status}).",
+                                PairingState.ERROR_INVALID_PAIRING_CODE if invalid_code else state,
+                                should_reconnect=resp.status >= 500 or resp.status in {408, 429},
+                            )
+                        return data
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise GameConnectionError(f"JDMO pairing request failed: {str(error) or 'request timed out'}.", state) from error
 
     async def send_initiate_punch_pairing(self):
         url = "https://prod.just-dance.com/sessions/v1/initiate-punch-pairing"
@@ -205,6 +249,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
             "mobileIP": self.host_ip_addr,
             "mobilePort": self.host_port,
         }
+
+        if self.pairing_method == PairingMethod.JDMO.value:
+            await self._request_jdmo_pairing("initiate-punch-pairing", json_payload)
+            return
 
         try:
             async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:

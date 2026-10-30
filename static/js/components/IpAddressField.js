@@ -1,6 +1,6 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
-import { PairingMethod, IpAddressRegex } from '/js/consts.js';
+import { PairingMethod, IpAddressRegex, usesHostAddress } from '/js/consts.js';
 
 export default class IpAddressField extends Component {
     constructor(props) {
@@ -27,7 +27,7 @@ export default class IpAddressField extends Component {
     }
 
     onChange(e) {
-        const key = this.props.pairing_method == PairingMethod.DEFAULT ? 'host_ip_addr' : 'console_ip_addr'
+        const key = usesHostAddress(this.props.pairing_method) ? 'host_ip_addr' : 'console_ip_addr'
         const value = e.target.value
         this.setState({
             [key]: value,
@@ -44,28 +44,29 @@ export default class IpAddressField extends Component {
     }
 
     componentDidMount() {
-        let addr = this.props.pairing_method == PairingMethod.DEFAULT ? this.state.host_ip_addr : this.state.console_ip_addr
+        const addr = usesHostAddress(this.props.pairing_method) ? this.state.host_ip_addr : this.state.console_ip_addr
         window.mitty.emit('update_addr', addr)
     }
 
     render(props, state) {
         const pairing_method = props.pairing_method
-        const addr = pairing_method == PairingMethod.DEFAULT ? state.host_ip_addr : state.console_ip_addr
+        const hostAddress = usesHostAddress(pairing_method)
+        const addr = hostAddress ? state.host_ip_addr : state.console_ip_addr
         return html`
             <label>
-                ${[PairingMethod.DEFAULT, PairingMethod.STADIA].indexOf(pairing_method) > -1 && html`Host Private IP`}
-                ${[PairingMethod.DEFAULT, PairingMethod.STADIA].indexOf(pairing_method) == -1 && html`Console Private IP`}
+                ${(hostAddress || pairing_method == PairingMethod.STADIA) && html`Host Private IP`}
+                ${(!hostAddress && pairing_method != PairingMethod.STADIA) && html`Console Private IP`}
             </label>
 
             ${(pairing_method == PairingMethod.STADIA) && html`
                 <input readonly id="ipAddr" type="text" size="15" placeholder="Not Required" />
             `}
 
-            ${(pairing_method == PairingMethod.DEFAULT && state.lock_host) && html`
+            ${(hostAddress && state.lock_host) && html`
                 <input readonly id="ipAddr" type="text" size="15" placeholder="${addr}" />
             `}
 
-            ${([PairingMethod.FAST, PairingMethod.OLD].indexOf(pairing_method) > -1 || (pairing_method == PairingMethod.DEFAULT && !state.lock_host)) && html`
+            ${([PairingMethod.FAST, PairingMethod.OLD].indexOf(pairing_method) > -1 || (hostAddress && !state.lock_host)) && html`
                 <input required id="ipAddr" type="text" inputmode="decimal" size="15" maxlength="15" placeholder="192.168.?/10.?" pattern="${IpAddressRegex.HTML_PATTERN}" value=${addr} onKeyPress=${this.onKeyPress} onChange="${this.onChange}" />
             `}
 

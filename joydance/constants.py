@@ -3,6 +3,8 @@ from enum import Enum
 JOYDANCE_VERSION = "0.6.0-beta3"
 UBI_APP_ID = "210da0fb-d6a5-4ed1-9808-01e86f0de7fb"
 UBI_SKU_ID = "jdcompanion-android"
+# Melody Online Controller 1.1.0 uses this service for code and punch pairing.
+JDMO_PAIRING_URL = "https://jmcs-main.c0llydoll.com/sessions"
 
 # Controller app 7.1.0 uses a 15-second connection timer and supports protocols through 5.
 JD_HANDSHAKE_TIMEOUT = 15
@@ -56,6 +58,7 @@ class PairingMethod(Enum):
     FAST = "fast"
     STADIA = "stadia"
     OLD = "old"
+    JDMO = "jdmo"
 
 
 class UiLayer(Enum):

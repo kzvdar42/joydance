@@ -11,7 +11,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus, NegotiationEr
 from websockets.frames import Close
 from websockets.protocol import State
 
-from joydance.constants import JD_PING_INTERVAL, JD_PING_TIMEOUT, JD_SERVICE_TIMEOUT, PairingState
+from joydance.constants import JD_PING_INTERVAL, JD_PING_TIMEOUT, JD_SERVICE_TIMEOUT, JDMO_PAIRING_URL, PairingMethod, PairingState
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
 from joydance.utils import GameConnectionError
@@ -24,7 +24,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
             factory.start()
             self.addCleanup(factory.stop)
 
-    def make_game(self, game_class):
+    def make_game(self, game_class, **kwargs):
         controller = SimpleNamespace(
             serial="connection-test", is_connected=Mock(return_value=True),
             set_accel_collection=Mock(), set_player_led=AsyncMock(),
@@ -32,7 +32,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
             get_joystick_command=Mock(return_value=None),
         )
         game = game_class(controller, pairing_code="123456", host_ip_addr="127.0.0.1",
-                          on_state_changed=AsyncMock(), on_game_message=AsyncMock())
+                          on_state_changed=AsyncMock(), on_game_message=AsyncMock(), **kwargs)
         game.attempt_reconnect = AsyncMock()
         self.addAsyncCleanup(game.disconnect, should_reconnect=False)
         return game
@@ -54,7 +54,186 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         session.__aenter__.return_value = session
         session.get.return_value = request
         session.post.return_value = request
+        session.request.return_value = request
         return session
+
+    async def test_jdmo_pairing_and_punch_requests_use_the_mod_service(self):
+        for punch in (False, True):
+            with self.subTest(punch=punch):
+                game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
+                session = self.http_session(body=json.dumps({"pairingUrl": "http://127.0.0.1:8080"}))
+                method = game.send_initiate_punch_pairing if punch else game.send_pairing_code
+                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session) as factory:
+                    await method()
+                args, kwargs = session.request.call_args
+                path = "initiate-punch-pairing" if punch else "pairing-info"
+                self.assertEqual(args, ("POST" if punch else "GET", f"{JDMO_PAIRING_URL}/v1/{path}"))
+                self.assertEqual(kwargs["params"], None if punch else {"code": "123456"})
+                self.assertEqual(kwargs["json"], {
+                    "pairingCode": "123456", "mobileIP": "127.0.0.1", "mobilePort": game.host_port,
+                } if punch else None)
+                self.assertNotIn("ssl", kwargs)
+                self.assertEqual(factory.call_args.kwargs["timeout"].total, JD_SERVICE_TIMEOUT)
+                self.assertNotIn("Authorization", factory.call_args.kwargs["headers"])
+
+    async def test_jdmo_falls_back_to_v2_only_for_a_missing_route(self):
+        for punch in (False, True):
+            for status, body, fallback in (
+                (404, "Cannot GET /sessions/v1/pairing-info", True),
+                (405, "", True), (404, "null", True),
+                (404, '{"code":"INVALID_CODE"}', False),
+                (400, '{"code":"INVALID_CODE"}', False),
+                (503, "Service unavailable", False),
+            ):
+                with self.subTest(punch=punch, status=status, body=body):
+                    game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
+                    session = self.http_session()
+                    session.request.side_effect = [
+                        self.http_session(status=status, body=body).get.return_value,
+                        self.http_session(body='{"pairingUrl":"https://127.0.0.1:8080"}').get.return_value,
+                    ]
+                    method = game.send_initiate_punch_pairing if punch else game.send_pairing_code
+                    with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+                        if fallback:
+                            await method()
+                        else:
+                            with self.assertRaises(GameConnectionError) as caught:
+                                await method()
+                            self.assertEqual(caught.exception.should_reconnect, status == 503)
+                            self.assertEqual(caught.exception.state, PairingState.ERROR_PUNCH_PAIRING if punch else (
+                                PairingState.ERROR_CONNECTION if status == 503 else PairingState.ERROR_INVALID_PAIRING_CODE
+                            ))
+                    self.assertEqual(session.request.call_count, 2 if fallback else 1)
+                    if fallback:
+                        self.assertIn("/v2/", session.request.call_args.args[1])
+
+    async def test_jdmo_service_transport_failures_keep_the_correct_phase(self):
+        for punch in (False, True):
+            game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
+            session = self.http_session()
+            session.request.side_effect = TimeoutError()
+            with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+                with self.assertRaises(GameConnectionError) as caught:
+                    await (game.send_initiate_punch_pairing() if punch else game.send_pairing_code())
+            self.assertTrue(caught.exception.should_reconnect)
+            self.assertEqual(caught.exception.state, PairingState.ERROR_PUNCH_PAIRING if punch else PairingState.ERROR_CONNECTION)
+            self.assertIn("timed out", str(caught.exception))
+
+    async def test_pairing_urls_preserve_transport_path_and_query(self):
+        for url, expected in (
+            ("http://127.0.0.1:8080", "ws://127.0.0.1:8080/smartphone"),
+            ("https://127.0.0.1:8080/", "wss://127.0.0.1:8080/smartphone"),
+            ("ws://127.0.0.1:8080/base/", "ws://127.0.0.1:8080/base/smartphone"),
+            ("wss://[::1]:8080/smartphone/?key=test", "wss://[::1]:8080/smartphone?key=test"),
+        ):
+            with self.subTest(url=url):
+                game = self.make_game(JustDanceGameV2)
+                session = self.http_session(json_body={"pairingUrl": url, "requiresPunchPairing": "false"})
+                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+                    await game.send_pairing_code()
+                self.assertEqual(game.pairing_url, expected)
+                self.assertFalse(game.requires_punch_pairing)
+
+    async def test_malformed_pairing_addresses_are_rejected(self):
+        for response in (None, {}, {"pairingUrl": 123}, *({"pairingUrl": url} for url in (
+            "", "http:///no-host", "ftp://example.test", "ws://[broken", "ws://localhost:99999",
+            "ws://user:password@localhost", "ws://localhost/#fragment",
+        ))):
+            with self.subTest(response=response):
+                game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
+                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(body=json.dumps(response))):
+                    with self.assertRaisesRegex(GameConnectionError, "Invalid console address"):
+                        await game.send_pairing_code()
+
+    async def test_only_jdmo_skips_ubisoft_authentication_and_keeps_punch_pairing(self):
+        for method in (PairingMethod.DEFAULT.value, PairingMethod.JDMO.value):
+            game = self.make_game(JustDanceGameV2, pairing_method=method)
+            game.requires_punch_pairing = True
+            with (
+                patch.object(game, "get_access_token", new=AsyncMock()) as token,
+                patch.object(game, "send_pairing_code", new=AsyncMock()) as code,
+                patch.object(game, "hole_punching", new=AsyncMock()) as punch,
+                patch.object(game, "connect_ws", new=AsyncMock()) as connect,
+            ):
+                await game.pair()
+            self.assertEqual(token.await_count, int(method == PairingMethod.DEFAULT.value))
+            code.assert_awaited_once()
+            punch.assert_awaited_once_with(on_listening=game.send_initiate_punch_pairing)
+            connect.assert_awaited_once()
+
+    async def test_v2_selects_tls_from_the_url_without_changing_subprotocol(self):
+        for scheme in ("ws", "wss"):
+            game = self.make_game(JustDanceGameV2)
+            game.pairing_url = f"{scheme}://127.0.0.1:8080/smartphone"
+            manager = MagicMock()
+            manager.__aenter__.return_value = self.socket()
+            with (
+                patch("joydance.games.justdance_v2.connect", return_value=manager) as connect,
+                patch.object(game, "run_connection_tasks", new=AsyncMock()),
+            ):
+                await game.connect_ws()
+            self.assertEqual(connect.call_args.kwargs["subprotocols"], ["v2.phonescoring.jd.ubisoft.com"])
+            self.assertEqual(connect.call_args.kwargs["ssl"] is None, scheme == "ws")
+            self.assertEqual(connect.call_args.kwargs["server_hostname"], "127.0.0.1" if scheme == "wss" else None)
+
+    async def test_v2_completes_a_real_plaintext_handshake(self):
+        game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
+        ready, release = asyncio.Event(), asyncio.Event()
+
+        async def server(websocket):
+            self.assertEqual(websocket.subprotocol, "v2.phonescoring.jd.ubisoft.com")
+            self.assertEqual(json.loads(await websocket.recv())["root"]["clientVersion"], "0.1")
+            await websocket.send(json.dumps({"__class": "JD_PhoneDataCmdHandshakeContinue", "phoneID": 2, "protocolVersion": 5}))
+            self.assertEqual(json.loads(await websocket.recv())["root"], {"__class": "JD_PhoneDataCmdSync", "phoneID": 2})
+            await websocket.send(json.dumps({"__class": "JD_PhoneDataCmdSyncEnd", "phoneID": 2}))
+            self.assertEqual(json.loads(await websocket.recv())["root"]["__class"], "JD_PhoneDataCmdSyncEnd")
+            ready.set()
+            await release.wait()
+
+        async with serve(server, "127.0.0.1", 0, subprotocols=["v2.phonescoring.jd.ubisoft.com"]) as listener:
+            game.pairing_url = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}/smartphone"
+            task = asyncio.create_task(game.connect_ws())
+            try:
+                await asyncio.wait_for(ready.wait(), 1)
+                self.assertTrue(game.is_connected)
+                await game.disconnect(should_reconnect=False)
+                await asyncio.wait_for(task, 1)
+            finally:
+                release.set()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_v2_keeps_punch_peer_hostname_selection_for_tls_only(self):
+        for url, expected in (
+            ("wss://192.168.1.3:8080/smartphone", "192.168.1.4"),
+            ("wss://10.0.0.3:8080/smartphone", "192.168.1.4"),
+            ("wss://console.example:8080/smartphone", "console.example"),
+            ("ws://192.168.1.3:8080/smartphone", None),
+        ):
+            with self.subTest(url=url):
+                game = self.make_game(JustDanceGameV2)
+                game.pairing_url = url
+                game.console_conn = Mock(getpeername=Mock(return_value=("192.168.1.4", 8080)))
+                manager = MagicMock()
+                manager.__aenter__.return_value = self.socket()
+                with (
+                    patch("joydance.games.justdance_v2.connect", return_value=manager) as connect,
+                    patch.object(game, "run_connection_tasks", new=AsyncMock()),
+                ):
+                    await game.connect_ws()
+                self.assertEqual(connect.call_args.kwargs["server_hostname"], expected)
+
+    async def test_v2_url_parse_failure_uses_connection_error_cleanup(self):
+        game = self.make_game(JustDanceGameV2)
+        game.pairing_url = "wss://[broken"
+        with (
+            patch("joydance.games.justdance_v2.connect") as connect,
+            patch.object(game, "_handle_connection_error", new=AsyncMock()) as handle_error,
+        ):
+            await game.connect_ws()
+        connect.assert_not_called()
+        handle_error.assert_awaited_once()
+        self.assertIsInstance(handle_error.await_args.args[0], ValueError)
 
     async def test_hello_and_sync_publish_connected_once_and_clear_old_errors(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):

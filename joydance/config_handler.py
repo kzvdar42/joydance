@@ -43,20 +43,7 @@ class ConfigHandler:
 
     @staticmethod
     def is_new_config_valid(new_config) -> bool:
-        if not is_valid_pairing_method(new_config["pairing_method"]):
-            return False
-
-        if new_config["pairing_method"] == PairingMethod.DEFAULT.value:
-            if not is_valid_ip_address(new_config["host_ip_addr"]) or not is_valid_pairing_code(
-                new_config["pairing_code"]
-            ):
-                return False
-
-        if new_config["pairing_method"] == PairingMethod.FAST.value and not is_valid_ip_address(
-            new_config["console_ip_addr"]
-        ):
-            return False
-        return True
+        return ConfigHandler.validate_config_with_error(new_config)[0]
 
     @staticmethod
     def validate_config_with_error(new_config) -> tuple[bool, str]:
@@ -66,7 +53,7 @@ class ConfigHandler:
         if not is_valid_pairing_method(method):
             return False, f"Invalid pairing method: {method}"
 
-        if method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value}:
+        if method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value, PairingMethod.JDMO.value}:
             if not is_valid_ip_address(new_config.get("host_ip_addr", "")):
                 return False, f"Invalid host IP address: {new_config.get('host_ip_addr', '')}"
             if not is_valid_pairing_code(new_config.get("pairing_code", "")):
@@ -159,6 +146,7 @@ def is_valid_pairing_method(val: str) -> bool:
         PairingMethod.FAST.value,
         PairingMethod.STADIA.value,
         PairingMethod.OLD.value,
+        PairingMethod.JDMO.value,
     }
 
 

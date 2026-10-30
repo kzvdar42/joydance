@@ -3,7 +3,11 @@ export const PairingMethod = {
     FAST: 'fast',
     STADIA: 'stadia',
     OLD: 'old',
+    JDMO: 'jdmo',
 }
+
+export const usesHostAddress = method => [PairingMethod.DEFAULT, PairingMethod.JDMO].includes(method)
+export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO].includes(method)
 
 export const WsCommand = {
     GET_CONTROLLER_LIST: 'get_controller_list',

@@ -33,6 +33,9 @@ export default class PairingMethodPicker extends Component {
                 <optgroup label="JD 2016-2019">
                     <option value="${PairingMethod.OLD}">Old: All platforms (incl. PC)</option>
                 </optgroup>
+                <optgroup label="Mods">
+                    <option value="${PairingMethod.JDMO}">JDMO 2021: Pairing code</option>
+                </optgroup>
             </select>
         `
     }
