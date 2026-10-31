@@ -8,7 +8,7 @@ import aiohttp
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed, InvalidStatus, NegotiationError
-from websockets.frames import Close
+from websockets.frames import Close, Frame, Opcode
 from websockets.protocol import State
 
 from joydance.constants import JD_PING_INTERVAL, JD_PING_TIMEOUT, JD_SERVICE_TIMEOUT, JDMO_PAIRING_URL, PairingMethod, PairingState
@@ -19,6 +19,9 @@ from joydance.utils import GameConnectionError
 
 class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        discovery = patch("joydance.games.justdance_v2.discover_jdmo_game", new=AsyncMock(return_value=None))
+        discovery.start()
+        self.addCleanup(discovery.stop)
         for module in ("justdance_abstract", "justdance_v1", "justdance_v2"):
             factory = patch("joydance.games." + module + ".logger")
             factory.start()
@@ -56,6 +59,33 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         session.post.return_value = request
         session.request.return_value = request
         return session
+
+    async def test_jdmo_local_match_bypasses_online_pairing(self):
+        game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
+        game.requires_punch_pairing = True
+        game.tls_certificate = "old certificate"
+        with (
+            patch("joydance.games.justdance_v2.discover_jdmo_game", new=AsyncMock(return_value="127.0.0.1")) as discover,
+            patch.object(game, "_request_jdmo_pairing", new=AsyncMock()) as request,
+        ):
+            await game.send_pairing_code()
+        discover.assert_awaited_once_with("123456", "127.0.0.1")
+        request.assert_not_awaited()
+        self.assertEqual(game.pairing_url, "ws://127.0.0.1:8080/smartphone")
+        self.assertFalse(game.requires_punch_pairing)
+        self.assertIsNone(game.tls_certificate)
+
+    async def test_official_pairing_does_not_use_jdmo_discovery(self):
+        game = self.make_game(JustDanceGameV2)
+        with (
+            patch("joydance.games.justdance_v2.discover_jdmo_game", new=AsyncMock()) as discover,
+            patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(
+                json_body={"pairingUrl": "https://127.0.0.1:8080"},
+            )),
+        ):
+            await game.send_pairing_code()
+        discover.assert_not_awaited()
+        self.assertEqual(game.pairing_url, "wss://127.0.0.1:8080/smartphone")
 
     async def test_jdmo_pairing_and_punch_requests_use_the_mod_service(self):
         for punch in (False, True):
@@ -488,6 +518,52 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                     await game.pair()
                 punch.assert_awaited_once_with(on_listening=game.send_initiate_punch_pairing)
                 connect.assert_awaited_once()
+
+    async def test_empty_pong_replies_keep_both_protocols_connected(self):
+        for game_class, protocol in ((JustDanceGameV1, "v1"), (JustDanceGameV2, "v2")):
+            with self.subTest(protocol=protocol):
+                game = self.make_game(game_class)
+                heartbeats, release = asyncio.Event(), asyncio.Event()
+                ping_payloads = []
+
+                async def server(websocket):
+                    original_send = websocket.protocol.send_frame
+
+                    def reply(frame):
+                        if frame.opcode is Opcode.PONG:
+                            ping_payloads.append(frame.data)
+                            frame = Frame(Opcode.PONG, b"")
+                            if len(ping_payloads) >= 3:
+                                heartbeats.set()
+                        original_send(frame)
+
+                    with patch.object(websocket.protocol, "send_frame", side_effect=reply):
+                        await websocket.recv()
+                        await websocket.send(json.dumps({"__class": "JD_PhoneDataCmdHandshakeContinue", "phoneID": 1, "protocolVersion": 5}))
+                        await websocket.recv()
+                        await websocket.send(json.dumps({"__class": "JD_PhoneDataCmdSyncEnd", "phoneID": 1}))
+                        await websocket.recv()
+                        await asyncio.wait_for(await websocket.ping(b"PING_MSG\0"), 1)
+                        await release.wait()
+
+                def connect_fast(uri, **kwargs):
+                    kwargs.update(ping_interval=0.02, ping_timeout=0.03, close_timeout=0.02)
+                    return websocket_connect(uri, **kwargs)
+
+                async with serve(server, "127.0.0.1", 0, subprotocols=[f"{protocol}.phonescoring.jd.ubisoft.com"], close_timeout=0.05) as listener:
+                    game.pairing_url = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}/smartphone"
+                    with patch(game_class.__module__ + ".connect", side_effect=connect_fast):
+                        task = asyncio.create_task(game.connect_ws())
+                        try:
+                            await asyncio.wait_for(heartbeats.wait(), 1)
+                            await asyncio.sleep(0.05)
+                            self.assertTrue(game.is_connected)
+                            self.assertFalse(task.done())
+                            self.assertTrue(all(payload == b"" for payload in ping_payloads))
+                        finally:
+                            release.set()
+                            task.cancel()
+                            await asyncio.gather(task, return_exceptions=True)
 
     async def test_silent_local_server_is_detected_after_successful_handshake(self):
         game = self.make_game(JustDanceGameV1)

@@ -1,4 +1,5 @@
 from .justdance_abstract import JustDanceGameAbstract
+from .websocket_connection import JustDanceConnection
 from collections import defaultdict
 import json
 import logging
@@ -234,6 +235,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 ssl=None,
                 ping_interval=JD_PING_INTERVAL,
                 ping_timeout=JD_PING_TIMEOUT,
+                create_connection=JustDanceConnection,
                 max_size=None,  # Disable message size limit to handle large JD_PhoneUiSetupData messages
                 proxy=None,
             ) as websocket:

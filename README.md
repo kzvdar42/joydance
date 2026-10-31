@@ -126,13 +126,13 @@ pip3 install -r requirements.txt
 
     - **Host Private IP**:
       - The private IP address of your PC/Mac/Linux running JoyDance. Find this in the Wi-Fi settings.
-      - Starts with `192.168.` or `10.`.
+      - Uses a private IPv4 address: `10.x.x.x`, `172.16.x.x` through `172.31.x.x`, or `192.168.x.x`.
     - **PC/Console Private IP**:
       - The private IP address of your PC/console. Find this in the Wi-Fi settings on PC/console.
-      - Starts with `192.168.` or `10.`.
+      - Uses a private IPv4 address: `10.x.x.x`, `172.16.x.x` through `172.31.x.x`, or `192.168.x.x`.
     - **Pairing Code**: get this from the game.
 
-    - **JDMO 2021**: select **JDMO 2021: Pairing code** under Mods, enter the code shown by the game, and use the IP address of the computer running JoyDance as Host Private IP. This uses JDMO's pairing service and follows the connection address returned by it.
+    - **JDMO 2021**: select **JDMO 2021: Pairing code** under Mods, enter the code shown by the game, and use the IP address of the computer running JoyDance as Host Private IP. JoyDance first looks for a local game with the matching code using UDP ports 6000/7000 and connects to its plaintext V2 listener on port 8080. If no matching local game is found within five seconds, it uses JDMO's online pairing service and follows the address returned by it.
 
 7. Press the "Connect" button next to Joy-Con to start the pairing process.
 

@@ -17,6 +17,8 @@ from joydance.constants import (
     JD_PING_TIMEOUT,
 )
 from .justdance_abstract import JustDanceGameAbstract
+from .discovery import discover_jdmo_game
+from .websocket_connection import JustDanceConnection
 from joydance.utils.network import is_private_ipv4
 
 
@@ -167,6 +169,18 @@ class JustDanceGameV2(JustDanceGameAbstract):
             if command is not None:
                 self._input_commands[cmd] = command
 
+    async def send_pairing_code(self):
+        if self.pairing_method == PairingMethod.JDMO.value:
+            address = await discover_jdmo_game(self.pairing_code, self.host_ip_addr)
+            if address:
+                # shortcut: local JDMO 2021 PC uses plaintext V2 on 8080; revisit if its listener changes.
+                self.pairing_url = f"ws://{address}:8080/smartphone"
+                self.tls_certificate = None
+                self.requires_punch_pairing = False
+                logger.debug("%s: Found matching JDMO game at %s", self.controller.serial, address)
+                return
+        await super().send_pairing_code()
+
     async def connect_ws(self):
         try:
             uri = urlparse(self.pairing_url)
@@ -200,6 +214,7 @@ class JustDanceGameV2(JustDanceGameAbstract):
                 ssl=ssl_context,
                 ping_interval=JD_PING_INTERVAL,
                 ping_timeout=JD_PING_TIMEOUT,
+                create_connection=JustDanceConnection,
                 max_size=None,  # Disable message size limit to handle large JD_PhoneUiSetupData messages
                 server_hostname=server_hostname,
                 proxy=None,
