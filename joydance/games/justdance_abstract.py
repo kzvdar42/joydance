@@ -734,8 +734,10 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 await self.controller.set_player_led(player_id, flash=was_connecting)
         elif __class == "JD_PlaySound_ConsoleCommandData":
             sound_index = message.get("soundIndex", 0)
-            await self._stop_rumble()
-            self._rumble_task = asyncio.create_task(self._play_rumble(sound_index))
+            # JDMO uses 0 for Empty; other pairing modes retain the legacy coach cue.
+            if sound_index != 0 or self.pairing_method != PairingMethod.JDMO.value:
+                await self._stop_rumble()
+                self._rumble_task = asyncio.create_task(self._play_rumble(sound_index))
         elif __class == "JD_PhoneDataCmdSyncEnd":
             if not await self.send_message("JD_PhoneDataCmdSyncEnd", {"phoneID": message["phoneID"]}):
                 return

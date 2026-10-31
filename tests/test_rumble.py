@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from websockets.protocol import State
 
+from joydance.constants import PairingMethod
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
 from joydance.controllers.joycon.rumble_patterns import RUMBLE_PATTERNS
 from joydance.controllers.joycon.pycon.constants import (
@@ -98,6 +99,48 @@ class RumbleTests(unittest.IsolatedAsyncioTestCase):
         game.ws = SimpleNamespace(state=State.OPEN, close=AsyncMock(), send=AsyncMock())
         game.is_connected = True
         return game
+
+    async def test_jdmo_empty_feedback_does_not_start_rumble(self):
+        game = self.make_game(JustDanceGameV2)
+        game.pairing_method = PairingMethod.JDMO.value
+        message = {"__class": "JD_PlaySound_ConsoleCommandData", "soundIndex": 0}
+        try:
+            await game.on_message(json.dumps(message))
+            self.assertIsNone(game._rumble_task)
+            game.controller.joycon.rumble_two_band.assert_not_called()
+            game.controller.stop_rumble.assert_not_called()
+            game._on_game_message.assert_awaited_once_with(message)
+        finally:
+            await game._stop_rumble()
+
+    async def test_jdmo_empty_feedback_does_not_interrupt_an_active_effect(self):
+        game = self.make_game(JustDanceGameV2)
+        game.pairing_method = PairingMethod.JDMO.value
+        started = asyncio.Event()
+        game.controller.joycon.rumble_two_band.side_effect = lambda *args: started.set()
+        try:
+            await game.on_message(PLAY_SOUND)
+            await asyncio.wait_for(started.wait(), 1)
+            task = game._rumble_task
+            await game.on_message(json.dumps({"__class": "JD_PlaySound_ConsoleCommandData", "soundIndex": 0}))
+            self.assertIs(game._rumble_task, task)
+            self.assertFalse(task.done())
+            game.controller.stop_rumble.assert_not_called()
+        finally:
+            await game._stop_rumble()
+
+    async def test_other_pairing_modes_keep_the_legacy_zero_cue(self):
+        for game_class in (JustDanceGameV1, JustDanceGameV2):
+            with self.subTest(protocol=game_class.__name__):
+                game = self.make_game(game_class)
+                started = asyncio.Event()
+                game.controller.joycon.rumble_two_band.side_effect = lambda *args: started.set()
+                try:
+                    await game.on_message(json.dumps({"__class": "JD_PlaySound_ConsoleCommandData", "soundIndex": 0}))
+                    await asyncio.wait_for(started.wait(), 1)
+                    game.controller.joycon.rumble_two_band.assert_called_with(*RUMBLE_PATTERNS[0][0][:4])
+                finally:
+                    await game._stop_rumble()
 
     async def test_receive_loop_handles_scoring_stop_while_rumbling(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):
