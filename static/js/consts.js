@@ -26,18 +26,22 @@ export const WebSocketState = {
     RECONNECTING: 2,
 }
 
+const ipv4Octet = '(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]?\\d)'
+const ipv4Regex = new RegExp(`^(?:${ipv4Octet}\\.){3}${ipv4Octet}$`)
+
 export const IpAddressRegex = {
-    // IP address validation pattern for JavaScript regex
-    JS_PATTERN: /^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/,
-    // IP address validation pattern for HTML pattern attribute (requires double escaping)
-    HTML_PATTERN: "^(\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])\\.(\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])\\.((\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])\\.)(\\d{1,2}|1\\d\\d|2[0-4]\\d|25[0-5])$"
+    JS_PATTERN: ipv4Regex,
+    HTML_PATTERN: ipv4Regex.source,
 }
 
+// Require the whole string: JavaScript's $ anchor also allows a final line break.
+export const isValidIPv4 = address =>
+    typeof address === 'string' && IpAddressRegex.JS_PATTERN.exec(address)?.[0] === address
+
 export const isPrivateIPv4 = address => {
-    const octets = address.split('.')
-    if (!IpAddressRegex.JS_PATTERN.test(address) || octets.some(octet => String(Number(octet)) !== octet)) {
+    if (!isValidIPv4(address)) {
         return false
     }
-    const [first, second] = octets.map(Number)
+    const [first, second] = address.split('.').map(Number)
     return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168)
 }

@@ -6,7 +6,7 @@ import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
 import { Controllers } from '/js/components/controller.js';
-import { WsCommand, IpAddressRegex, usesHostAddress, usesPairingCode } from '/js/consts.js';
+import { WsCommand, isValidIPv4, usesHostAddress, usesPairingCode } from '/js/consts.js';
 
 window.mitty = mitt()
 
@@ -82,7 +82,7 @@ class App extends Component {
         const state = this.state
         const pairing_method = state.pairing_method
         const addr = usesHostAddress(pairing_method) ? state.host_ip_addr : state.console_ip_addr
-        if (!addr.match(IpAddressRegex.JS_PATTERN)) {
+        if (!isValidIPv4(addr)) {
             alert('ERROR: Invalid IP address!')
             document.getElementById('ipAddr').focus()
             return

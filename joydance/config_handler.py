@@ -78,11 +78,6 @@ class ConfigHandler:
                 elif key == "pairing_code":
                     if not is_valid_pairing_code(val):
                         val = ""
-                elif key.startswith("accel_"):
-                    try:
-                        val = int(val)
-                    except ValueError:
-                        val = new_config[key]
                 validated_config[key] = val
         return validated_config
 
