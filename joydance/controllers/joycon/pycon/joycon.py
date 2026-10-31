@@ -1180,32 +1180,38 @@ class JoyCon:
         }
 
     def encode_rumble_data(self, frequency=320.0, amplitude=0.0):
-        """Encode rumble data for the JoyCon.
-        
-        Args:
-            frequency (float): Frequency in Hz (valid range: 40.875885-1252.572266)
-            amplitude (float): Amplitude from 0.0 to 1.0
-        """
-        # Clamp values to valid ranges
-        frequency = max(40.875885, min(1252.572266, frequency))
+        """Encode both actuators, clamping each frequency band and amplitude to safe ranges."""
+        if not math.isfinite(frequency) or not math.isfinite(amplitude):
+            raise ValueError("Rumble frequency and amplitude must be finite")
         amplitude = max(0.0, min(1.0, amplitude))
+        # Encoding and amplitude table: https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/rumble_data_table.md
+        if amplitude <= 0.117471:
+            # The reference has no low-amplitude formula; use its published values.
+            low_amplitudes = (
+                0.0, 0.007843, 0.011823, 0.014061, 0.016720, 0.019885,
+                0.023648, 0.028123, 0.033442, 0.039771, 0.047296,
+                0.056246, 0.066886, 0.079542, 0.094592, 0.112491, 0.117471,
+            )
+            amp_encoded = min(range(len(low_amplitudes)), key=lambda i: abs(low_amplitudes[i] - amplitude))
+        elif amplitude < 0.229908:
+            amp_encoded = round(math.log2(amplitude * 17.0) * 16.0)
+        else:
+            amp_encoded = round(math.log2(amplitude * 8.7) * 32.0)
+        amp_encoded = max(0, min(100, amp_encoded))
+        if amp_encoded == 0:
+            return self._RUMBLE_DATA
 
-        # Encode frequency
-        freq_encoded = int(round(math.log2(frequency/10.0)*32.0))
-        freq_data = bytes([
-            ((freq_encoded >> 8) & 0xFF) + 0x40, 
-            freq_encoded & 0xFF
+        frequency = max(40.875885, min(1252.572266, frequency))
+        freq_encoded = round(math.log2(frequency / 10.0) * 32.0)
+        high_frequency = (max(0x61, min(0xDF, freq_encoded)) - 0x60) * 4
+        low_frequency = max(0x41, min(0xBF, freq_encoded)) - 0x40
+        actuator = bytes([
+            high_frequency & 0xFF,
+            (amp_encoded << 1) | (high_frequency >> 8),
+            low_frequency | ((amp_encoded & 1) << 7),
+            0x40 + (amp_encoded >> 1),
         ])
-
-        # Encode amplitude
-        amp_encoded = int(round(amplitude * 100))
-        amp_data = bytes([
-            (amp_encoded << 1) & 0xFF,
-            0x40
-        ])
-
-        # Combine data for both motors (HD and LRA)
-        return amp_data + freq_data + amp_data + freq_data
+        return actuator * 2
 
     @property
     def rumble_enabled(self):
@@ -1230,6 +1236,15 @@ class JoyCon:
 
         self._rumble_data = self.encode_rumble_data(frequency, amplitude)
         # Report 0x10 carries rumble without a subcommand.
+        self._write_output_report(b'\x10', b'\x00', b'\x00')
+
+    def rumble_two_band(self, low_frequency, low_amplitude, high_frequency, high_amplitude):
+        """Send independent low and high bands using the same safe encoder."""
+        if not self.rumble_enabled:
+            return
+        low = self.encode_rumble_data(low_frequency, low_amplitude)
+        high = self.encode_rumble_data(high_frequency, high_amplitude)
+        self._rumble_data = (high[:2] + low[2:4]) * 2
         self._write_output_report(b'\x10', b'\x00', b'\x00')
 
     def stop_rumble(self):

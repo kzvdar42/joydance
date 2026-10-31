@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from .pycon import ButtonEventJoyCon
+from .rumble_patterns import RUMBLE_PATTERNS
 from .pycon.constants import (
     JOYCON_VENDOR_ID, JOYCON_PRODUCT_IDS,
     JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID,
@@ -192,33 +193,24 @@ class JoyConWrapper(AbstractControllerWrapper):
         return self.product_id == JOYCON_PRO_PRODUCT_ID
 
     async def handle_rumble_on_sound_index(self, sound_index):
-        if not self.rumble_enabled:
+        if not self.rumble_enabled or not isinstance(sound_index, int):
             return
+        if 51 <= sound_index <= 56:
+            sound_index = 51  # Dance-start variants for each coach.
+        elif 61 <= sound_index <= 66:
+            sound_index = 61  # Player-join variants.
+        pattern = RUMBLE_PATTERNS.get(sound_index)
+        if pattern is None:
+            return
+        loop = asyncio.get_running_loop()
+        deadline = loop.time()
         try:
-            if sound_index == 0:  # Coach selection
-                self.rumble(frequency=160.0, amplitude=0.3)
-                await asyncio.sleep(0.15)
-            elif 1 <= sound_index <= 5:  # Stars (1-5)
-                strength = 0.3 + (sound_index * 0.12)
-                duration = 0.1 + (sound_index * 0.05)
-                self.rumble(frequency=240.0, amplitude=strength)
-                await asyncio.sleep(duration)
-            elif sound_index == 6:  # Megastar
-                for amp_val in [0.5, 0.7, 1.0]:
-                    self.rumble(frequency=320.0, amplitude=amp_val)
-                    await asyncio.sleep(0.15)
-                    self.stop_rumble()
-                    await asyncio.sleep(0.08)
-            elif sound_index == 7:  # Star move
-                self.rumble(frequency=280.0, amplitude=0.8)
-                await asyncio.sleep(0.2)
-            elif sound_index == 8:  # Start dance
-                self.rumble(frequency=240.0, amplitude=0.6)
-                await asyncio.sleep(0.15)
-                self.stop_rumble()
-                await asyncio.sleep(0.1)
-                self.rumble(frequency=320.0, amplitude=0.8)
-                await asyncio.sleep(0.2)
+            for low_hz, low_amp, high_hz, high_amp, duration in pattern:
+                if not self.rumble_enabled:
+                    return
+                self.joycon.rumble_two_band(low_hz, low_amp, high_hz, high_amp)
+                deadline += duration
+                await asyncio.sleep(max(0, deadline - loop.time()))
         finally:
             self.stop_rumble()
 
