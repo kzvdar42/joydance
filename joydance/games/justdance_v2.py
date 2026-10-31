@@ -17,6 +17,7 @@ from joydance.constants import (
     JD_PING_TIMEOUT,
 )
 from .justdance_abstract import JustDanceGameAbstract
+from joydance.utils.network import is_private_ipv4
 
 
 logger = logging.getLogger("joydance")
@@ -184,8 +185,8 @@ class JustDanceGameV2(JustDanceGameAbstract):
                         logger.error("%s: V2 Failed to load TLS certificate: %s", self.controller.serial, e)
 
                 server_hostname = uri.hostname
-                # TODO: handle other private IPs
-                if self.console_conn and server_hostname and server_hostname.startswith(("192.168.", "10.")):
+                if self.console_conn and server_hostname and is_private_ipv4(server_hostname):
+                    # Use the accepted peer for private addresses advertised behind NAT.
                     server_hostname = self.console_conn.getpeername()[0]
 
             subprotocol = WS_SUBPROTOCOLS[WsSubprotocolVersion.V2.value]

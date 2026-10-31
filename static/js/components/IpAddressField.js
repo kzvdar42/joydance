@@ -1,6 +1,6 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
-import { PairingMethod, IpAddressRegex, usesHostAddress } from '/js/consts.js';
+import { PairingMethod, IpAddressRegex, isPrivateIPv4, usesHostAddress } from '/js/consts.js';
 
 export default class IpAddressField extends Component {
     constructor(props) {
@@ -11,7 +11,7 @@ export default class IpAddressField extends Component {
         let console_ip_addr = props.console_ip_addr
 
         let hostname = window.location.hostname
-        if (hostname.startsWith('192.168.') || hostname.startsWith('10.')) {
+        if (isPrivateIPv4(hostname)) {
             host_ip_addr = hostname
             lock_host = true
         }
@@ -67,7 +67,7 @@ export default class IpAddressField extends Component {
             `}
 
             ${([PairingMethod.FAST, PairingMethod.OLD].indexOf(pairing_method) > -1 || (hostAddress && !state.lock_host)) && html`
-                <input required id="ipAddr" type="text" inputmode="decimal" size="15" maxlength="15" placeholder="192.168.?/10.?" pattern="${IpAddressRegex.HTML_PATTERN}" value=${addr} onKeyPress=${this.onKeyPress} onChange="${this.onChange}" />
+                <input required id="ipAddr" type="text" inputmode="decimal" size="15" maxlength="15" placeholder="e.g. 172.16.0.2" pattern="${IpAddressRegex.HTML_PATTERN}" value=${addr} onKeyPress=${this.onKeyPress} onChange="${this.onChange}" />
             `}
 
         `

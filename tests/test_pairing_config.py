@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from joydance.config_handler import ConfigHandler, is_valid_pairing_method
+from joydance.config_handler import ConfigHandler, get_host_ip, is_valid_pairing_method
 
 
 class PairingConfigTests(unittest.TestCase):
@@ -39,3 +39,31 @@ class PairingConfigTests(unittest.TestCase):
             reloaded = ConfigHandler(path)
             self.assertEqual(reloaded.data["pairing_method"], "jdmo")
             self.assertEqual(reloaded.data["pairing_code"], "012345")
+
+
+class HostAddressTests(unittest.TestCase):
+    def test_private_lan_addresses_take_priority_over_other_addresses(self):
+        for address in ("10.1.2.3", "172.16.0.1", "172.31.255.254", "192.168.1.2"):
+            with self.subTest(address=address), patch(
+                "joydance.config_handler.socket.gethostbyname_ex",
+                return_value=("host", [], ["invalid", "169.254.1.2", "192.0.2.3", "127.0.0.1", "8.8.8.8", address]),
+            ):
+                self.assertEqual(get_host_ip(), address)
+
+    def test_first_valid_address_remains_the_fallback(self):
+        for addresses, expected in (
+            (["invalid", "8.8.8.8", "169.254.1.2"], "8.8.8.8"),
+            (["169.254.1.2"], "169.254.1.2"),
+            (["127.0.0.1"], "127.0.0.1"),
+            (["172.15.255.255", "172.32.0.0"], "172.15.255.255"),
+            (["invalid"], None),
+            ([], None),
+        ):
+            with self.subTest(addresses=addresses), patch(
+                "joydance.config_handler.socket.gethostbyname_ex", return_value=("host", [], addresses),
+            ):
+                self.assertEqual(get_host_ip(), expected)
+
+    def test_address_lookup_failure_returns_no_address(self):
+        with patch("joydance.config_handler.socket.gethostbyname_ex", side_effect=OSError("Offline")):
+            self.assertIsNone(get_host_ip())

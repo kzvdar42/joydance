@@ -207,8 +207,22 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         for url, expected in (
             ("wss://192.168.1.3:8080/smartphone", "192.168.1.4"),
             ("wss://10.0.0.3:8080/smartphone", "192.168.1.4"),
+            ("wss://10.255.255.255:8080/smartphone", "192.168.1.4"),
+            ("wss://172.16.0.0:8080/smartphone", "192.168.1.4"),
+            ("wss://172.31.255.255:8080/smartphone", "192.168.1.4"),
+            ("wss://192.168.255.255:8080/smartphone", "192.168.1.4"),
+            ("wss://172.15.255.255:8080/smartphone", "172.15.255.255"),
+            ("wss://172.32.0.0:8080/smartphone", "172.32.0.0"),
+            ("wss://8.8.8.8:8080/smartphone", "8.8.8.8"),
+            ("wss://127.0.0.1:8080/smartphone", "127.0.0.1"),
+            ("wss://169.254.1.3:8080/smartphone", "169.254.1.3"),
+            ("wss://192.0.2.3:8080/smartphone", "192.0.2.3"),
+            ("wss://[::1]:8080/smartphone", "::1"),
             ("wss://console.example:8080/smartphone", "console.example"),
+            ("wss://10.console.example:8080/smartphone", "10.console.example"),
+            ("wss://192.168.console.example:8080/smartphone", "192.168.console.example"),
             ("ws://192.168.1.3:8080/smartphone", None),
+            ("ws://172.16.1.3:8080/smartphone", None),
         ):
             with self.subTest(url=url):
                 game = self.make_game(JustDanceGameV2)
@@ -222,6 +236,18 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                 ):
                     await game.connect_ws()
                 self.assertEqual(connect.call_args.kwargs["server_hostname"], expected)
+
+    async def test_v2_keeps_private_hostname_without_a_punch_socket(self):
+        game = self.make_game(JustDanceGameV2)
+        game.pairing_url = "wss://172.16.1.3:8080/smartphone"
+        manager = MagicMock()
+        manager.__aenter__.return_value = self.socket()
+        with (
+            patch("joydance.games.justdance_v2.connect", return_value=manager) as connect,
+            patch.object(game, "run_connection_tasks", new=AsyncMock()),
+        ):
+            await game.connect_ws()
+        self.assertEqual(connect.call_args.kwargs["server_hostname"], "172.16.1.3")
 
     async def test_v2_url_parse_failure_uses_connection_error_cleanup(self):
         game = self.make_game(JustDanceGameV2)

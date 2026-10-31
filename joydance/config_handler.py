@@ -6,12 +6,10 @@ import sys
 import ipaddress
 
 from .constants import PairingMethod
+from .utils.network import is_private_ipv4
 
 
 REGEX_PAIRING_CODE = re.compile(r"^\d{6}$")
-REGEX_LOCAL_IP_ADDRESS = re.compile(
-    r"^(192\.168|10.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]))\.((\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.)(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$"
-)
 
 
 class ConfigHandler:
@@ -153,16 +151,12 @@ def is_valid_pairing_method(val: str) -> bool:
 def get_host_ip() -> str | None:
     """Get the host IP address, preferring private network addresses."""
     try:
-        for ip_str in socket.gethostbyname_ex(socket.gethostname())[2]:
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                # Prefer private IP addresses (10.x, 172.16-31.x, 192.168.x)
-                if ip.is_private and not ip.is_loopback:
-                    return ip_str
-            except ValueError:
-                continue
+        addresses = socket.gethostbyname_ex(socket.gethostname())[2]
+        for ip_str in addresses:
+            if is_private_ipv4(ip_str):
+                return ip_str
         # If no private IP found, return the first valid IP
-        for ip_str in socket.gethostbyname_ex(socket.gethostname())[2]:
+        for ip_str in addresses:
             if is_valid_ip_address(ip_str):
                 return ip_str
     except Exception:
