@@ -132,7 +132,7 @@ pip3 install -r requirements.txt
       - Uses a private IPv4 address: `10.x.x.x`, `172.16.x.x` through `172.31.x.x`, or `192.168.x.x`.
     - **Pairing Code**: get this from the game.
 
-    - **JDMO 2021**: select **JDMO 2021: Pairing code** under Mods, enter the code shown by the game, and use the IP address of the computer running JoyDance as Host Private IP. JoyDance first looks for a local game with the matching code using UDP ports 6000/7000 and connects to its plaintext V2 listener on port 8080. If no matching local game is found within five seconds, it uses JDMO's online pairing service and follows the address returned by it.
+    - **JDMO 2021**: select **JDMO 2021: Pairing code** under Mods, enter the code shown by the game, and use the IP address of the computer running JoyDance as Host Private IP. JoyDance first looks for a local game with the matching code using UDP ports 6000/7000 and verifies its plaintext V2 WebSocket endpoint on port 8080 before selecting it, so a phone relay is not mistaken for the game. If no matching local game is found within five seconds, it uses JDMO's online pairing service and follows the address returned by it.
 
 7. Press the "Connect" button next to Joy-Con to start the pairing process.
 
