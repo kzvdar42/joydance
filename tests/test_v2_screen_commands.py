@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from websockets.protocol import State
 
 from joydance.constants import Command
+from joydance.controllers.joycon.pycon.constants import JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID
 from joydance.games.justdance_v2 import JustDanceGameV2
 from test_button_mapping import BufferedButtons, controller_with_buttons, input_collection, menu_setup, press
 
@@ -208,3 +209,38 @@ class V2ScreenCommandTests(unittest.IsolatedAsyncioTestCase):
             await game.on_message(json.dumps(screen(Command.BACK, {"__class": "JD_GoBack_PhoneCommandData", "targetId": target})))
         self.assertEqual(await self.game.preprocess_command(Command.BACK), ("JD_GoBack_PhoneCommandData", {"targetId": 7}))
         self.assertEqual(await other.preprocess_command(Command.BACK), ("JD_GoBack_PhoneCommandData", {"targetId": 42}))
+
+    async def test_jdmo_video_controls_can_coexist_and_still_pause_while_scoring(self):
+        for product_id, buttons in (
+            (JOYCON_R_PRODUCT_ID, ("a", "x", "y", "plus", "r", "zr", "stick_r_btn")),
+            (JOYCON_L_PRODUCT_ID, ("right", "up", "left", "minus", "l", "zl", "stick_l_btn")),
+            (JOYCON_PRO_PRODUCT_ID, ("a", "x", "y", "plus", "l", "r", "stick_r_btn")),
+        ):
+            with self.subTest(product_id=product_id):
+                self.game = self.make_game()
+                self.game.controller.product_id = product_id
+                identifiers = (
+                    "SHORTCUT_VALIDATE", "SHORTCUT_TOGGLE_SUBTITLES", "SHORTCUT_VIDEO_RESTART",
+                    "SHORTCUT_TOGGLE_VIDEO_PLAYBACK", "SHORTCUT_TOGGLE_RUMBLE",
+                    "SHORTCUT_TOGGLE_RELATED_SONGS_AUTOPLAY", "SHORTCUT_TOGGLE_AUTOSCROLLING",
+                )
+                setup = menu_setup()
+                setup["setupData"]["shortcuts"] = [
+                    {"shortcutType": identifier, **descriptor({
+                        "__class": "JD_ScreenAction_PhoneCommandData", "action": identifier, "targetId": 0,
+                    })}
+                    for identifier in identifiers
+                ]
+                await self.game.on_message(json.dumps(setup))
+                for button, identifier in zip(buttons, identifiers):
+                    command = Command(identifier)
+                    self.assertEqual(press(self.game.controller, button), command)
+                    self.assertEqual(await self.game.preprocess_command(command), (
+                        "JD_ScreenAction_PhoneCommandData", {"action": identifier, "targetId": 0},
+                    ))
+                await self.message("ShortcutSetup_ConsoleCommandData", isEnabled=False)
+                for identifier in identifiers:
+                    self.assertEqual(await self.game.preprocess_command(Command(identifier)), (None, None))
+                await self.message("JD_EnableAccelValuesSending_ConsoleCommandData")
+                allowed = {cmd for cmd in Command if self.game.is_command_allowed(cmd)}
+                self.assertEqual(press(self.game.controller, buttons[3], allowed), Command.PAUSE)

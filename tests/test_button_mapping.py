@@ -87,6 +87,37 @@ def input_collection(commands):
 
 
 class ButtonMappingTests(unittest.TestCase):
+    def test_jdmo_shortcuts_are_contextual_on_joycons_and_pro_controllers(self):
+        for identifier, right_button, left_button, pro_buttons in (
+            ("PHONE_FTUE_FINISH", "a", "right", ("a",)),
+            ("SHORTCUT_VALIDATE", "a", "right", ("a",)),
+            ("SHORTCUT_PLAY_UNLOCKED_MAP", "a", "right", ("a",)),
+            ("SHORTCUT_IGNORE", "x", "up", ("x",)),
+            ("SHORTCUT_GOTO_PLAYLISTSTAB", "x", "up", ("x",)),
+            ("SHORTCUT_COMMUNITY_POLL_CHANGE_POOL", "x", "up", ("x",)),
+            ("SHORTCUT_TOGGLE_SUBTITLES", "x", "up", ("x",)),
+            ("SHORTCUT_VIDEO_RESTART", "y", "left", ("y",)),
+            ("SHORTCUT_TOGGLE_VIDEO_PLAYBACK", "plus", "minus", ("plus",)),
+            ("SHORTCUT_TOGGLE_RUMBLE", "r", "l", ("l", "zl")),
+            ("SHORTCUT_TOGGLE_RELATED_SONGS_AUTOPLAY", "zr", "zl", ("r", "zr")),
+            ("SHORTCUT_TOGGLE_AUTOSCROLLING", "stick_r_btn", "stick_l_btn", ("stick_l_btn", "stick_r_btn")),
+        ):
+            for product_id, buttons in (
+                (JOYCON_R_PRODUCT_ID, (right_button,)),
+                (JOYCON_L_PRODUCT_ID, (left_button,)),
+                (JOYCON_PRO_PRODUCT_ID, pro_buttons),
+            ):
+                with self.subTest(identifier=identifier, product_id=product_id):
+                    command = Command(identifier)
+                    controller = controller_with_buttons()
+                    controller.product_id = product_id
+                    for button in buttons:
+                        controller.available_shortcuts = {command}
+                        self.assertEqual(press(controller, button), command)
+                        self.assertIsNone(press(controller, button, set()))
+                        controller.available_shortcuts = set()
+                        self.assertNotEqual(press(controller, button), command)
+
     def test_basic_commands_work_without_screen_shortcuts(self):
         controller = controller_with_buttons()
         for button, expected in (
