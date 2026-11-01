@@ -10,6 +10,7 @@ export const usesHostAddress = method => [PairingMethod.DEFAULT, PairingMethod.J
 export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO].includes(method)
 
 export const WsCommand = {
+    GET_CONNECTIONS: 'get_connections',
     GET_CONTROLLER_LIST: 'get_controller_list',
     CONNECT_CONTROLLER: 'connect_controller',
     DISCONNECT_CONTROLLER: 'disconnect_controller',

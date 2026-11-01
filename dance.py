@@ -6,6 +6,7 @@ import os
 import sys
 import mimetypes
 import argparse
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import WSMsgType, web
@@ -21,6 +22,8 @@ from joydance.constants import (
 from joydance.controllers import update_controllers_list
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.discovery import discover_consoles
+from joydance.utils.network import normalize_console_url
 
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger("dance")
@@ -96,6 +99,14 @@ async def connect_controller(app, ws, data) -> None:
         host_ip_addr = data["host_ip_addr"]
         console_ip_addr = data["console_ip_addr"]
         pairing_code = data["pairing_code"]
+        console_options = {}
+        if data.get("console_url") is not None:
+            if pairing_method != PairingMethod.OLD.value:
+                raise ValueError("Discovered addresses are only used for legacy connections.")
+            console_url = normalize_console_url(data["console_url"])
+            if urlparse(console_url).hostname != console_ip_addr:
+                raise ValueError("Discovered address does not match the console IP.")
+            console_options["console_url"] = console_url
 
         is_valid, error_msg = app["config_handler"].validate_config_with_error(data)
         if not is_valid:
@@ -130,6 +141,7 @@ async def connect_controller(app, ws, data) -> None:
                 on_state_changed=on_joydance_state_changed,
                 on_game_message=on_game_message,
                 pairing_method=pairing_method,
+                **console_options,
             )
 
             previous_connection = app["joydance_connections"].get(serial)
@@ -226,8 +238,44 @@ async def html_handler(request):
     with open(get_static_path("static/index.html"), "r", encoding="utf-8") as f:
         html = f.read()
         html = html.replace("[[CONFIG]]", json.dumps(config))
+        html = html.replace("[[CONNECTIONS]]", json.dumps(request.app["config_handler"].connections).replace("<", "\\u003c"))
         html = html.replace("[[VERSION]]", JOYDANCE_VERSION)
         return web.Response(text=html, content_type="text/html")
+
+
+async def discovery_handler(request):
+    try:
+        consoles = await discover_consoles(request.app["config_handler"].data["host_ip_addr"])
+        return web.json_response({"consoles": consoles})
+    except OSError:
+        logger.debug("Local console discovery unavailable", exc_info=True)
+        return web.json_response({
+            "error": "Could not scan the network. Close other controller apps using port 7000 and try again.",
+        }, status=503)
+
+
+async def connections_handler(request):
+    config = request.app["config_handler"]
+    try:
+        if request.method == "POST":
+            if request.content_type != "application/json":
+                raise ValueError("Expected connection settings as JSON.")
+            connection = config.save_connection(await request.json())
+        elif request.method == "DELETE":
+            config.delete_connection(request.match_info["id"])
+        else:
+            return web.json_response({"connections": config.connections})
+        await ws_broadcast_response(request.app, WsCommand.GET_CONNECTIONS, config.connections)
+        response = {"connections": config.connections}
+        if request.method == "POST":
+            response["connection"] = connection
+        return web.json_response(response)
+    except (ValueError, TypeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except KeyError as error:
+        return web.json_response({"error": error.args[0]}, status=404)
+    except OSError as error:
+        return web.json_response({"error": str(error)}, status=503)
 
 
 async def ws_send_response(ws, cmd, data):
@@ -296,7 +344,9 @@ async def websocket_handler(request):
                     continue
 
                 try:
-                    if cmd == WsCommand.SEARCH_INPUT:
+                    if cmd == WsCommand.GET_CONNECTIONS:
+                        await ws_send_response(ws, cmd, request.app["config_handler"].connections)
+                    elif cmd == WsCommand.SEARCH_INPUT:
                         text = data.get("text", "")
                         serial = data.get("controller_serial")
                         if not isinstance(serial, str) or serial not in request.app["joydance_connections"]:
@@ -415,6 +465,10 @@ if __name__ == "__main__":
                 web.get("/", html_handler),
                 web.get("/favicon.png", favicon_handler),
                 web.get("/ws", websocket_handler),
+                web.get("/discovery", discovery_handler),
+                web.get("/connections", connections_handler),
+                web.post("/connections", connections_handler),
+                web.delete("/connections/{id}", connections_handler),
                 web.static("/css", get_static_path("static/css")),
                 web.static("/js", get_static_path("static/js")),
             ]

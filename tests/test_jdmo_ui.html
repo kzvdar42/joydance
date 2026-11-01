@@ -1,12 +1,13 @@
 <!doctype html>
 <!-- Serve this file at /tests/test_jdmo_ui.html with static/ mounted at /. Uses no live WebSocket or hardware. -->
-<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
 <script src="/js/mitt.umd.js"></script><title>JDMO pairing regression check</title></head>
 <body><script type="module">
 import { WsCommand, usesHostAddress, usesPairingCode } from '/js/consts.js';
 
 window.CONFIG = {pairing_method:'jdmo',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'012345'};
+window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'JDMO game'}];
 window.VERSION = 'JDMO pairing preview';
 const sent = [], alerts = [];
 window.alert = message => alerts.push(message);
@@ -32,6 +33,8 @@ try {
     }
     await import('/js/app.js');
     await settle();
+    document.querySelector('.connections-list button').click();
+    await settle();
     check(document.querySelector('option[value="jdmo"]')?.textContent.includes('JDMO 2021'), 'JDMO must be selectable');
     check(document.querySelector('#stacked-state').value === 'jdmo', 'Saved JDMO selection must be restored');
     check(document.querySelector('#ipAddr').value === '192.168.1.2', 'JDMO must use the host address');
@@ -41,11 +44,11 @@ try {
     const request = sent.at(-1);
     check(request.cmd === WsCommand.CONNECT_CONTROLLER, 'Connect request is missing');
     check(request.data.pairing_method === 'jdmo' && request.data.pairing_code === '012345', 'JDMO method and code must reach the backend');
-    check(request.data.host_ip_addr === '192.168.1.9' && request.data.console_ip_addr === '192.168.1.3', 'Editing host must preserve console address');
+    check(request.data.host_ip_addr === '192.168.1.2' && request.data.console_ip_addr === '192.168.1.3', 'Unsaved edits must preserve selected connection settings');
     await change('#pairingCode', '12');
     const count = sent.length;
     await connect();
-    check(alerts.length === 1 && sent.length === count, 'Invalid JDMO codes must be blocked');
+    check(alerts.length === 0 && sent.length === count + 1, 'Invalid unsaved drafts must not affect the selected connection');
     await change('#pairingCode', '012345');
     await change('#stacked-state', 'fast');
     check(document.querySelector('#ipAddr').value === '192.168.1.3', 'Fast mode must keep the console address');

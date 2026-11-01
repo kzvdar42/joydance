@@ -2,11 +2,9 @@ import { Component, render } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
 import SearchInputField from '/js/components/SearchInputField.js';
 import WebSocketStatusIndicator from '/js/components/WebSocketStatusIndicator.js';
-import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
-import IpAddressField from '/js/components/IpAddressField.js';
-import PairingCodeField from '/js/components/PairingCodeField.js';
+import Connections from '/js/components/Connections.js';
 import { Controllers } from '/js/components/controller.js';
-import { WsCommand, isValidIPv4, usesHostAddress, usesPairingCode } from '/js/consts.js';
+import { WsCommand, isPrivateIPv4, isValidIPv4, usesHostAddress, usesPairingCode } from '/js/consts.js';
 
 window.mitty = mitt()
 
@@ -15,10 +13,7 @@ class App extends Component {
         super()
 
         this.state = {
-            pairing_method: window.CONFIG.pairing_method,
-            host_ip_addr: window.CONFIG.host_ip_addr,
-            console_ip_addr: window.CONFIG.console_ip_addr,
-            pairing_code: window.CONFIG.pairing_code,
+            connection: null,
             controllers: [],
         }
         // Websocket settings
@@ -33,9 +28,7 @@ class App extends Component {
         this.requestGetControllerList = this.requestGetControllerList.bind(this)
         this.requestConnectController = this.requestConnectController.bind(this)
         this.requestDisconnectController = this.requestDisconnectController.bind(this)
-        this.handleMethodChange = this.handleMethodChange.bind(this)
-        this.handleAddrChange = this.handleAddrChange.bind(this)
-        this.handleCodeChange = this.handleCodeChange.bind(this)
+        this.handleConnectionSelect = this.handleConnectionSelect.bind(this)
         this.handleSearchInput = this.handleSearchInput.bind(this)
         this.handleToggleRumble = this.handleToggleRumble.bind(this)
 
@@ -44,9 +37,6 @@ class App extends Component {
         window.mitty.on('req_' + WsCommand.DISCONNECT_CONTROLLER, this.requestDisconnectController)
         window.mitty.on('req_' + WsCommand.SEARCH_INPUT, this.handleSearchInput)
         window.mitty.on('req_' + WsCommand.TOGGLE_RUMBLE, this.handleToggleRumble)
-        window.mitty.on('update_method', this.handleMethodChange)
-        window.mitty.on('update_addr', this.handleAddrChange)
-        window.mitty.on('update_code', this.handleCodeChange)
     }
 
     sendRequest(cmd, data = {}) {
@@ -79,12 +69,15 @@ class App extends Component {
     }
 
     requestConnectController(serial) {
-        const state = this.state
+        const state = this.state.connection
+        if (!state) {
+            alert('Select a connection or add a new one first.')
+            return
+        }
         const pairing_method = state.pairing_method
         const addr = usesHostAddress(pairing_method) ? state.host_ip_addr : state.console_ip_addr
         if (!isValidIPv4(addr)) {
             alert('ERROR: Invalid IP address!')
-            document.getElementById('ipAddr').focus()
             return
         }
 
@@ -92,7 +85,6 @@ class App extends Component {
             const pairing_code = state.pairing_code
             if (!pairing_code.match(/^\d{6}$/)) {
                 alert('ERROR: Invalid pairing code!')
-                document.getElementById('pairingCode').focus()
                 return
             }
         }
@@ -103,6 +95,7 @@ class App extends Component {
             console_ip_addr: state.console_ip_addr,
             pairing_code: state.pairing_code,
             controller_serial: serial,
+            ...(state.console_url ? {console_url: state.console_url} : {}),
         })
     }
 
@@ -127,6 +120,7 @@ class App extends Component {
             if (this.socket !== socket) return;
             console.log('[open] Connection established')
             that.requestGetControllerList()
+            that.sendRequest(WsCommand.GET_CONNECTIONS)
             window.mitty.emit('ws_connected');
             this.reconnectAttempts = 0;
         }
@@ -193,23 +187,11 @@ class App extends Component {
         }
     }
 
-    handleMethodChange(pairing_method) {
-        this.setState({
-            pairing_method: pairing_method,
-        })
-    }
-
-    handleAddrChange(addr) {
-        const key = usesHostAddress(this.state.pairing_method) ? 'host_ip_addr' : 'console_ip_addr'
-        this.setState({
-            [key]: addr,
-        })
-    }
-
-    handleCodeChange(pairing_code) {
-        this.setState({
-            pairing_code: pairing_code,
-        })
+    handleConnectionSelect(connection) {
+        this.setState({connection: connection && {
+            ...connection,
+            host_ip_addr: isPrivateIPv4(window.location.hostname) ? window.location.hostname : connection.host_ip_addr,
+        }})
     }
 
     componentDidMount() {
@@ -240,29 +222,11 @@ class App extends Component {
                     <${WebSocketStatusIndicator} />
                 </div>
 
-                <form class="pure-form pure-form-stacked">
-                    <fieldset>
-                        <div class="pure-g">
-                            <h2 class="pure-u-1">Config</h2>
-                            <div class="pure-u-1">
-                                <${PairingMethodPicker} pairing_method=${state.pairing_method}/>
-                            </div>
-                            <div class="pure-u-1-2">
-                                <${IpAddressField} pairing_method=${state.pairing_method} host_ip_addr=${state.host_ip_addr} console_ip_addr=${state.console_ip_addr} />
-                            </div>
-                            <div class="pure-u-1-2">
-                                <${PairingCodeField} pairing_method=${state.pairing_method} pairing_code=${state.pairing_code} />
-                            </div>
-                            <div class="pure-u-1">
-                                <${SearchInputField} />
-                            </div>
-                        </div>
-                    </fieldset>
-                </form>
+                <${Connections} config=${window.CONFIG} pairing_method=${state.connection?.pairing_method || window.CONFIG.pairing_method} onSelect=${this.handleConnectionSelect} />
+                <${SearchInputField} />
 
                 <div class="pure-u-1 controllers">
                     <${Controllers} 
-                        pairing_method=${state.pairing_method} 
                         controllers=${state.controllers}
                     />
                 </div>

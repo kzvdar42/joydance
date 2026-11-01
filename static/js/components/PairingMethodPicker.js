@@ -4,21 +4,14 @@ import { PairingMethod } from '/js/consts.js';
 
 export default class PairingMethodPicker extends Component {
     constructor(props) {
-        super()
-        this.state = {
-            pairing_method: props.pairing_method,
-        }
+        super(props)
 
         this.onChange = this.onChange.bind(this)
     }
 
     onChange(e) {
         const pairing_method = e.target.value
-        this.setState({
-            pairing_method: pairing_method,
-        })
-
-        window.mitty.emit('update_method', pairing_method)
+        this.props.onChange(pairing_method)
     }
 
     render(props) {

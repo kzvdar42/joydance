@@ -1,0 +1,168 @@
+<!doctype html>
+<!-- Serve at /tests/test_discovery_ui.html with static/ mounted at /. No live game or controller required. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
+<script src="/js/mitt.umd.js"></script><title>Connections regression check</title></head>
+<body><script type="module">
+window.CONFIG = {pairing_method:'default',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'123456'};
+window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'Previous connection'}];
+window.VERSION = 'Connections preview';
+const sent = [], alerts = [], scans = [], writes = [], confirmations = [], deletions = [];
+let confirmDelete = false;
+let saved = [...window.CONNECTIONS], nextId = 1, failSave = false, delaySave = false, releaseSave;
+window.alert = message => alerts.push(message);
+window.confirm = message => { confirmations.push(message); return confirmDelete; };
+window.WebSocket = class {
+    static OPEN = 1; static CLOSED = 3;
+    constructor() { this.readyState = 1; window.testSocket = this; }
+    send(message) { sent.push(JSON.parse(message)); }
+};
+window.fetch = async (url, options = {}) => {
+    if (url === '/discovery') return new Promise(resolve => scans.push(resolve));
+    if (options.method === 'POST') {
+        const draft = JSON.parse(options.body);
+        writes.push(draft);
+        if (delaySave) await new Promise(resolve => { releaseSave = resolve; });
+        if (failSave) return {ok:false,json:async () => ({error:'Could not save the connection.'})};
+        const entry = {...draft, id:draft.id || String(nextId++).padStart(32, '0')};
+        delete entry.console_urls;
+        delete entry.title_id;
+        saved = [...saved.filter(item => item.id !== entry.id), entry];
+        return {ok:true,json:async () => ({connections:saved,connection:entry})};
+    }
+    if (options.method === 'DELETE') {
+        deletions.push(url);
+        saved = saved.filter(item => url !== '/connections/' + item.id);
+        return {ok:true,json:async () => ({connections:saved})};
+    }
+    throw new Error('Unexpected request: ' + url);
+};
+const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+const change = async (selector, value) => {
+    const field = document.querySelector(selector);
+    field.value = value;
+    field.dispatchEvent(new Event('change', {bubbles:true}));
+    await settle();
+};
+const click = async element => { element.click(); await settle(); };
+const button = text => [...document.querySelectorAll('button')].find(element => element.textContent.trim() === text);
+const row = name => [...document.querySelectorAll('.connections-list li')].find(element => element.querySelector('strong').textContent === name);
+const action = (name, text) => [...row(name).querySelectorAll('button')].find(element => element.textContent === text);
+const connect = async () => { window.mitty.emit('req_connect_controller', 'test'); await settle(); return sent.at(-1)?.data; };
+const reply = async (data, ok = true) => { scans.at(-1)({ok,json:async () => data}); await settle(); };
+const consoles = [
+    {name:'Legacy on LAN',protocol:'v1',title_id:'PC-JD2017',console_ip_addr:'192.168.1.8',console_url:'ws://192.168.1.8:9000/game/smartphone?token=123',
+        console_urls:['ws://192.168.1.8:9000/game/smartphone?token=123','ws://127.0.0.1:9000/game/smartphone?token=123','ws://172.19.0.1:9000/game/smartphone?token=123']},
+    {name:'Just Dance',protocol:'v2',pairing_code:'012345'},
+    {name:'Duplicate of previous',protocol:'v2',pairing_code:'123456'},
+];
+try {
+    await import('/js/app.js'); await settle();
+    check(scans.length === 0, 'Discovery must remain opt-in');
+    check(row('Previous connection').querySelector('input').checked, 'The previous configuration must be selected');
+    check((await connect()).pairing_code === '123456', 'Saved selection must reach the connection request');
+    await click(button('Add connection'));
+    check(document.activeElement.id === 'connectionName', 'Adding a connection must focus its name field');
+    await change('#connectionName', 'Living room');
+    await change('#stacked-state', 'old');
+    await change('#ipAddr', '192.168.1.8');
+    check(document.querySelector('#pairingCode').readOnly, 'Legacy entries must not require a code');
+    delaySave = true;
+    await click(button('Save connection'));
+    check(button('Add connection').disabled && action('Previous connection', 'Edit').disabled && action('Previous connection', 'Delete').disabled,
+        'Editor-changing actions must be disabled while a save is pending');
+    check(row('Previous connection').querySelector('input').disabled, 'Pending saves must not allow changing selection');
+    await click(button('Add connection'));
+    await click(action('Previous connection', 'Edit'));
+    await click(action('Previous connection', 'Delete'));
+    check(document.querySelector('#connectionName').value === 'Living room' && writes.length === 1 && saved.length === 1,
+        'A delayed save must preserve its draft and block competing mutations');
+    delaySave = false;
+    releaseSave();
+    await settle();
+    check(!document.querySelector('.connection-editor') && row('Living room'), 'Adding must save and close the editor');
+    check(!button('Add connection').disabled && !action('Living room', 'Edit').disabled,
+        'Editor actions must be restored after a save');
+    check((await connect()).console_ip_addr === '192.168.1.8', 'The added entry must be selected');
+    await click(action('Living room', 'Edit'));
+    await change('#ipAddr', '192.168.1.9');
+    await click(button('Cancel'));
+    check((await connect()).console_ip_addr === '192.168.1.8', 'Canceling edits must preserve the selected settings');
+    await click(action('Living room', 'Edit'));
+    await change('#connectionName', 'Game PC');
+    await click(button('Save connection'));
+    check(saved.length === 2 && row('Game PC'), 'Editing must update the existing saved entry');
+    await click(button('Scan network'));
+    check(button('Scanning…').disabled, 'Scanning must show progress');
+    check((await connect()).console_ip_addr === '192.168.1.8', 'Scanning must not block using a saved connection');
+    await reply({consoles});
+    check(document.querySelectorAll('.connections-list li').length === 4, 'Saved and local entries must share one deduplicated list');
+    check(row('Previous connection').textContent.includes('Saved · Local'), 'A matching discovery must mark the saved entry as local');
+    await click(row('Just Dance').querySelector('input'));
+    check((await connect()).pairing_code === '012345', 'Local code selection must work without saving');
+    await click(action('Just Dance', 'Save'));
+    await change('#connectionName', 'JDMO 2021');
+    await change('#stacked-state', 'jdmo');
+    await click(button('Save connection'));
+    check((await connect()).pairing_method === 'jdmo', 'Saving a local code must allow choosing the JDMO service');
+    check(document.querySelectorAll('.connections-list li').length === 4, 'Saving a discovery must not duplicate it');
+    await click(row('Legacy on LAN').querySelector('input'));
+    check((await connect()).console_url.includes(':9000/game/smartphone'), 'Local selection must preserve custom ports and paths');
+    await click(action('Legacy on LAN', 'Save'));
+    await change('#connectionName', 'Local legacy game');
+    await click(button('Save connection'));
+    check(writes.at(-1).console_url.includes(':9000/game/smartphone'), 'Saving a discovery must preserve its custom URL');
+    const savedLegacy = saved.find(item => item.name === 'Local legacy game');
+    const alias = {...savedLegacy, console_ip_addr:'127.0.0.1', console_url:'ws://127.0.0.1:9000/game/smartphone?token=123'};
+    delete alias.console_urls;
+    saved = saved.map(item => item.id === alias.id ? alias : item);
+    window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_get_connections',data:saved})});
+    await settle();
+    check(!row('Legacy on LAN') && row('Local legacy game').textContent.includes('Saved · Local'), 'A saved loopback alias must hide the equivalent LAN discovery');
+    check((await connect()).console_ip_addr === '127.0.0.1', 'Alias matching must preserve the saved connection address');
+    await click(action('Local legacy game', 'Edit'));
+    await change('#ipAddr', '192.168.1.7');
+    await click(button('Save connection'));
+    check(!('console_url' in await connect()), 'Changing the console address must clear the discovered URL');
+    await click(action('Local legacy game', 'Delete'));
+    check(confirmations.at(-1).includes('Local legacy game'), 'Delete confirmation must identify the saved connection');
+    check(deletions.length === 0 && row('Local legacy game') && row('Local legacy game').querySelector('input').checked,
+        'Canceling deletion must preserve the entry and selection without sending a request');
+    confirmDelete = true;
+    await click(action('Local legacy game', 'Delete'));
+    check(deletions.length === 1, 'Confirmed deletion must send exactly one request');
+    const count = sent.length;
+    await connect();
+    check(!row('Local legacy game') && sent.length === count && alerts.length === 1, 'Deleting the selected entry must clear the selection');
+    await click(row('Game PC').querySelector('input'));
+    const selected = saved.find(item => item.name === 'Game PC');
+    window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_get_connections',data:saved.filter(item => item.id !== selected.id)})});
+    await settle(); await connect();
+    check(alerts.length === 2 && !row('Game PC'), 'Deletion in another browser must clear a stale selection');
+    saved = saved.filter(item => item.id !== selected.id);
+    await click(button('Add connection'));
+    await change('#connectionName', 'Unsaved entry');
+    failSave = true;
+    await click(button('Save connection'));
+    check(document.querySelector('#connectionName').value === 'Unsaved entry' && document.querySelector('[role=alert]').textContent.includes('Could not save') && !button('Add connection').disabled,
+        'Save errors must preserve the draft and restore editor actions');
+    failSave = false;
+    await click(button('Cancel'));
+    await click(button('Scan network')); await reply({consoles:[]});
+    check(document.querySelector('.connections').textContent.includes('No local games found') && row('Previous connection'), 'An empty scan must preserve saved entries');
+    await click(button('Scan network')); await reply({error:'Close other controller apps using port 7000.'}, false);
+    check(document.querySelector('[role=alert]').textContent.includes('7000') && !button('Scan network').disabled, 'Failed scans must allow retrying');
+    await click(button('Scan network')); await reply({consoles});
+    await click(row('Previous connection').querySelector('input'));
+    window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_get_controller_list',data:[{
+        serial:'test',name:'Pro Controller',controller_type:'pro_controller',color:'#383638',color_buttons:'#222',state:0,battery_level:4,
+    }]})});
+    await settle();
+    check(row('Previous connection').querySelector('input').checked, 'Controller updates must preserve connection selection');
+    document.body.prepend(Object.assign(document.createElement('p'), {id:'result',textContent:'PASS: saved/local list, add/edit/cancel/delete, discovery, service selection, cross-browser updates and errors.'}));
+} catch (error) {
+    document.body.prepend(Object.assign(document.createElement('pre'), {id:'result',textContent:'FAIL: ' + error.stack}));
+    throw error;
+}
+</script></body></html>

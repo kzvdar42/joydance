@@ -4,9 +4,13 @@ import os
 import socket
 import sys
 import ipaddress
+import json
+import tempfile
+from uuid import uuid4
+from urllib.parse import urlparse
 
 from .constants import PairingMethod
-from .utils.network import is_private_ipv4
+from .utils.network import is_private_ipv4, normalize_console_url
 
 
 REGEX_PAIRING_CODE = re.compile(r"^\d{6}$")
@@ -27,8 +31,72 @@ class ConfigHandler:
             cfg_paths = [cfg_paths]
         self.cfg_paths = cfg_paths
         self.current_cfg_path = None
-        self._parser = ConfigParser()
+        self._parser = ConfigParser(interpolation=None)
         self._data = self.read_data()
+        self._connections = []
+        stored = self._parser.get("connections", "items", fallback=None)
+        if stored is None:
+            try:
+                self._connections.append(self._validate_connection({**self._data, "name": "Previous connection"}))
+            except ValueError:
+                pass
+        else:
+            try:
+                entries = json.loads(stored)
+                if not isinstance(entries, list):
+                    raise ValueError("Expected a list of saved connections")
+                self._connections = [self._validate_connection(entry) for entry in entries]
+                if len({item["id"] for item in self._connections}) != len(self._connections):
+                    raise ValueError("Duplicate saved connection identifiers")
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"Could not load saved connections from {self.current_cfg_path}: {error}") from error
+
+    @property
+    def connections(self):
+        return [connection.copy() for connection in self._connections]
+
+    def _validate_connection(self, data):
+        if not isinstance(data, dict):
+            raise ValueError("Invalid connection settings.")
+        name = data.get("name")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
+            raise ValueError("Give the connection a name of up to 80 characters.")
+        if any(not isinstance(data.get(key, ""), str) for key in self.DEFAULT_CONFIG):
+            raise ValueError("Invalid connection settings.")
+        valid, error = self.validate_config_with_error(data)
+        if not valid:
+            raise ValueError(error)
+        connection = {**self.validate_new_config(data), "id": data.get("id", uuid4().hex), "name": name.strip()}
+        if not isinstance(connection["id"], str) or not re.fullmatch(r"[0-9a-f]{32}", connection["id"]):
+            raise ValueError("Invalid connection identifier.")
+        if data.get("console_url") is not None:
+            url = normalize_console_url(data["console_url"])
+            if connection["pairing_method"] != PairingMethod.OLD.value or urlparse(url).hostname != connection["console_ip_addr"]:
+                raise ValueError("Discovered address does not match the connection settings.")
+            connection["console_url"] = url
+        return connection
+
+    def save_connection(self, data):
+        connection = self._validate_connection(data)
+        if data.get("id") and not any(item["id"] == connection["id"] for item in self._connections):
+            raise KeyError("This saved connection no longer exists.")
+        previous = self._connections
+        self._connections = [connection if item["id"] == connection["id"] else item for item in previous]
+        if not data.get("id"):
+            self._connections.append(connection)
+        if not self.save_data():
+            self._connections = previous
+            raise OSError("Could not save the connection. Check access to the configuration file.")
+        return connection.copy()
+
+    def delete_connection(self, identifier):
+        previous = self._connections
+        self._connections = [item for item in previous if item["id"] != identifier]
+        if len(previous) == len(self._connections):
+            raise KeyError("This saved connection no longer exists.")
+        if not self.save_data():
+            self._connections = previous
+            raise OSError("Could not delete the connection. Check access to the configuration file.")
 
     @property
     def data(self):
@@ -57,7 +125,7 @@ class ConfigHandler:
             if not is_valid_pairing_code(new_config.get("pairing_code", "")):
                 return False, f"Invalid pairing code (must be 6 digits): {new_config.get('pairing_code', '')}"
 
-        if method == PairingMethod.FAST.value:
+        if method in {PairingMethod.FAST.value, PairingMethod.OLD.value}:
             if not is_valid_ip_address(new_config.get("console_ip_addr", "")):
                 return False, f"Invalid console IP address: {new_config.get('console_ip_addr', '')}"
 
@@ -101,20 +169,28 @@ class ConfigHandler:
     def save_data(self):
         self.current_cfg_path = None
         self._parser["joydance"] = self._data
+        self._parser["connections"] = {"items": json.dumps(self._connections)}
         for config_path in self.cfg_paths:
             config_folder = os.path.dirname(config_path)
+            temporary_path = None
             try:
                 if config_folder:
                     os.makedirs(config_folder, exist_ok=True)
-                with open(config_path, "w", encoding="utf-8") as fp:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=config_folder or ".", delete=False) as fp:
+                    temporary_path = fp.name
                     self._parser.write(fp)
+                os.replace(temporary_path, config_path)
                 self.current_cfg_path = config_path
                 # save to first path with access
-                return
+                return True
             except OSError:
                 pass
+            finally:
+                if temporary_path and os.path.exists(temporary_path):
+                    os.unlink(temporary_path)
         else:
             print(f'Failed to write config file to "{self.cfg_paths}"')
+            return False
 
 
 def is_valid_pairing_code(val: str) -> bool:

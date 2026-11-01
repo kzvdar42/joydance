@@ -6,20 +6,8 @@ export default class IpAddressField extends Component {
     constructor(props) {
         super(props)
 
-        let lock_host = false
-        let host_ip_addr = props.host_ip_addr
-        let console_ip_addr = props.console_ip_addr
-
-        let hostname = window.location.hostname
-        if (isPrivateIPv4(hostname)) {
-            host_ip_addr = hostname
-            lock_host = true
-        }
-
         this.state = {
-            host_ip_addr: host_ip_addr,
-            console_ip_addr: console_ip_addr,
-            lock_host: lock_host,
+            lock_host: isPrivateIPv4(window.location.hostname),
         }
 
         this.onKeyPress = this.onKeyPress.bind(this)
@@ -27,33 +15,29 @@ export default class IpAddressField extends Component {
     }
 
     onChange(e) {
-        const key = usesHostAddress(this.props.pairing_method) ? 'host_ip_addr' : 'console_ip_addr'
         const value = e.target.value
-        this.setState({
-            [key]: value,
-        })
-
-        window.mitty.emit('update_addr', value)
+        this.props.onChange(value)
     }
 
     onKeyPress(e) {
-        if (!/[0-9\.]/.test(e.key)) {
+        if (e.key.length === 1 && !/[0-9\.]/.test(e.key)) {
             e.preventDefault()
             return
         }
     }
 
     componentDidMount() {
-        const addr = usesHostAddress(this.props.pairing_method) ? this.state.host_ip_addr : this.state.console_ip_addr
-        window.mitty.emit('update_addr', addr)
+        const host = this.state.lock_host ? window.location.hostname : this.props.host_ip_addr
+        const addr = usesHostAddress(this.props.pairing_method) ? host : this.props.console_ip_addr
+        this.props.onChange(addr)
     }
 
     render(props, state) {
         const pairing_method = props.pairing_method
         const hostAddress = usesHostAddress(pairing_method)
-        const addr = hostAddress ? state.host_ip_addr : state.console_ip_addr
+        const addr = hostAddress ? props.host_ip_addr : props.console_ip_addr
         return html`
-            <label>
+            <label for="ipAddr">
                 ${(hostAddress || pairing_method == PairingMethod.STADIA) && html`Host Private IP`}
                 ${(!hostAddress && pairing_method != PairingMethod.STADIA) && html`Console Private IP`}
             </label>
@@ -63,7 +47,7 @@ export default class IpAddressField extends Component {
             `}
 
             ${(hostAddress && state.lock_host) && html`
-                <input readonly id="ipAddr" type="text" size="15" placeholder="${addr}" />
+                <input readonly id="ipAddr" type="text" size="15" value=${addr} />
             `}
 
             ${([PairingMethod.FAST, PairingMethod.OLD].indexOf(pairing_method) > -1 || (hostAddress && !state.lock_host)) && html`

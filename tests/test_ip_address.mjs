@@ -21,7 +21,7 @@ await module.link(specifier => load(resolve(staticRoot, '.' + specifier)));
 await module.evaluate();
 const IpAddressField = module.namespace.default;
 const { isValidIPv4, IpAddressRegex } = modules.get(resolve(staticRoot, 'js/consts.js')).namespace;
-const props = { pairing_method: 'default', host_ip_addr: '192.168.1.2', console_ip_addr: '192.168.1.3' };
+const props = { pairing_method: 'default', host_ip_addr: '192.168.1.2', console_ip_addr: '192.168.1.3', onChange: value => events.push(['update_addr', value]) };
 
 for (const [address, valid] of [
     ['0.0.0.0', true], ['255.255.255.255', true], ['172.16.0.1', true], ['8.8.8.8', true],
@@ -55,8 +55,6 @@ for (const [hostname, privateAddress] of [
         const field = new IpAddressField({ ...props, pairing_method: method });
         const expected = privateAddress ? hostname : props.host_ip_addr;
         assert.equal(field.state.lock_host, privateAddress, hostname);
-        assert.equal(field.state.host_ip_addr, expected, hostname);
-        assert.equal(field.state.console_ip_addr, props.console_ip_addr, hostname);
         field.componentDidMount();
         assert.deepEqual(events.pop(), ['update_addr', method === 'fast' ? props.console_ip_addr : expected]);
     }

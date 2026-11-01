@@ -23,8 +23,9 @@ class JustDanceGameV1(JustDanceGameAbstract):
     Handles all v1-specific communication, message parsing, and command preprocessing.
     """
 
-    def __init__(self, controller, *args, **kwargs):
+    def __init__(self, controller, *args, console_url=None, **kwargs):
         super().__init__(controller, *args, **kwargs)
+        self.console_url = console_url
         self.is_main_player = False
         self._carousel_setup = defaultdict(
             lambda: {
@@ -259,7 +260,7 @@ class JustDanceGameV1(JustDanceGameAbstract):
                 await self.on_state_changed(
                     {"state": PairingState.CONNECTING.value}
                 )
-                self.pairing_url = f"ws://{self.console_ip_addr}:8080/smartphone"
+                self.pairing_url = self.console_url or f"ws://{self.console_ip_addr}:8080/smartphone"
 
             else:
                 await self.on_state_changed(

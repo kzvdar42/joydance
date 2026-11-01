@@ -113,7 +113,10 @@ pip3 install -r requirements.txt
 
 5. Turn on Bluetooth and pair with Joy-Con by holding down the [SYNC button](https://en-americas-support.nintendo.com/app/answers/detail/a_id/22634) until the light move up and down. Press the "Refresh" button until your Joy-Con shows up.
 
-6. Fill the form.
+6. Choose a connection under **Connections**, or press **Add connection** to enter its name and settings. Use **Edit** to update a saved entry (including a changed pairing code), or **Delete** to remove it. Saved connections are stored in JoyDance's configuration file and shared across browsers. Your previous configuration is imported once as **Previous connection**.
+
+    - **Optional local discovery**: press **Scan network**. Found games appear alongside saved connections, with **Local** and **Saved** labels. Select a local game to use it immediately, or press **Save** to keep it. Older games use their advertised local address; newer games supply a pairing code, which is resolved through the selected pairing service. For JDMO 2021, choose its pairing method when saving the result. Custom ports and paths are preserved in saved entries. Discovery accepts phone relay replies without treating the phone's IP as the game. Scanning uses UDP ports 6000/7000 and takes about five seconds.
+      Multiple addresses for the same game on the JoyDance computer are grouped, preferring the configured host address. A saved entry matching any detected address is shown as **Saved · Local**.
 
     - **Pairing Method**:
       |                    | Default        | Fast      | Stadia    | Old                   |

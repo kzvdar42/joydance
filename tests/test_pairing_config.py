@@ -15,7 +15,7 @@ class PairingConfigTests(unittest.TestCase):
                     config = {**complete, "pairing_method": method, **changes}
                     expected = not (
                         method in {"default", "stadia", "jdmo"} and (not config["host_ip_addr"] or not config["pairing_code"])
-                        or method == "fast" and not config["console_ip_addr"]
+                        or method in {"fast", "old"} and not config["console_ip_addr"]
                     )
                     self.assertEqual(ConfigHandler.validate_config_with_error(config)[0], expected)
                     self.assertEqual(ConfigHandler.is_new_config_valid(config), expected)

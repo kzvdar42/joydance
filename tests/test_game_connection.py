@@ -75,6 +75,21 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(game.requires_punch_pairing)
         self.assertIsNone(game.tls_certificate)
 
+    async def test_legacy_discovery_uses_advertised_url_on_every_connection_attempt(self):
+        game = self.make_game(
+            JustDanceGameV1, console_ip_addr="192.168.1.8", pairing_method="old",
+            console_url="ws://192.168.1.8:9000/custom/smartphone?token=123",
+        )
+        game.connect_ws = AsyncMock()
+        game.get_access_token = AsyncMock()
+        game.send_pairing_code = AsyncMock()
+        for _ in range(2):
+            await game.pair()
+            self.assertEqual(game.pairing_url, "ws://192.168.1.8:9000/custom/smartphone?token=123")
+        self.assertEqual(game.connect_ws.await_count, 2)
+        game.get_access_token.assert_not_awaited()
+        game.send_pairing_code.assert_not_awaited()
+
     async def test_official_pairing_does_not_use_jdmo_discovery(self):
         game = self.make_game(JustDanceGameV2)
         with (
@@ -547,7 +562,8 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                         await release.wait()
 
                 def connect_fast(uri, **kwargs):
-                    kwargs.update(ping_interval=0.02, ping_timeout=0.03, close_timeout=0.02)
+                    # Leave room for Windows scheduling and delayed loopback packets.
+                    kwargs.update(ping_interval=0.02, ping_timeout=0.3, close_timeout=0.02)
                     return websocket_connect(uri, **kwargs)
 
                 async with serve(server, "127.0.0.1", 0, subprotocols=[f"{protocol}.phonescoring.jd.ubisoft.com"], close_timeout=0.05) as listener:
