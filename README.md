@@ -115,6 +115,8 @@ pip3 install -r requirements.txt
 
 6. Choose a connection under **Connections**, or press **Add connection** to enter its name and settings. Use **Edit** to update a saved entry (including a changed pairing code), or **Delete** to remove it. Saved connections are stored in JoyDance's configuration file and shared across browsers. Your previous configuration is imported once as **Previous connection**.
 
+    - **Configuration file**: the local `config.cfg` lives beside `dance.py` for source runs, or beside the executable for packaged runs. An existing writable local config takes precedence; otherwise JoyDance reuses an existing writable per-user config. With neither file present, it tries the local folder first and falls back to the user data folder (`%APPDATA%\JoyDance\config.cfg` on Windows). A read-only local config seeds a new user config once if needed. Each run loads and saves one selected file; startup output shows the paths used.
+
     - **Optional local discovery**: press **Scan network**. Found games appear alongside saved connections, with **Local** and **Saved** labels. Select a local game to use it immediately, or press **Save** to keep it. Older games use their advertised local address; newer games supply a pairing code, which is resolved through the selected pairing service. For JDMO 2021, choose its pairing method when saving the result. Custom ports and paths are preserved in saved entries. Discovery accepts phone relay replies without treating the phone's IP as the game. Scanning uses UDP ports 6000/7000 and takes about five seconds.
       Multiple addresses for the same game on the JoyDance computer are grouped, preferring the configured host address. A saved entry matching any detected address is shown as **Saved · Local**.
 

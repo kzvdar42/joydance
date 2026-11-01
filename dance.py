@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import aiohttp
 from aiohttp import WSMsgType, web
 
-from joydance.config_handler import ConfigHandler, get_datadir
+from joydance.config_handler import ConfigHandler, get_config_paths
 from joydance.constants import (
     WsCommand,
     PairingState,
@@ -39,7 +39,7 @@ def handle_task_exception(task):
         logger.error("Unhandled exception in background task: %s", e, exc_info=True)
 
 
-CONFIG_PATHS = ["config.cfg", os.path.join(get_datadir(), "config.cfg")]
+CONFIG_PATHS = get_config_paths(__file__)
 
 
 async def update_controllers_info(app):

@@ -29,9 +29,9 @@ class ConfigHandler:
     def __init__(self, cfg_paths: list[str] | str):
         if isinstance(cfg_paths, str):
             cfg_paths = [cfg_paths]
-        self.cfg_paths = cfg_paths
+        self.cfg_paths = list(dict.fromkeys(os.path.abspath(path) for path in cfg_paths))
+        self._cfg_path = None
         self.current_cfg_path = None
-        self._parser = ConfigParser(interpolation=None)
         self._data = self.read_data()
         self._connections = []
         stored = self._parser.get("connections", "items", fallback=None)
@@ -151,10 +151,30 @@ class ConfigHandler:
 
     def read_data(self):
         self.current_cfg_path = None
-        files_read = self._parser.read(filenames=self.cfg_paths)
-        # Save the first successful path
-        if files_read:
-            self.current_cfg_path = files_read[0]
+        self._cfg_path = None
+        self._parser = ConfigParser(interpolation=None)
+        existing_paths = [path for path in self.cfg_paths if os.path.exists(path)]
+        # Reuse an existing config before creating a new one beside the application.
+        for path in existing_paths + [path for path in self.cfg_paths if path not in existing_paths]:
+            if not self._can_write_config(path):
+                continue
+            parser = ConfigParser(interpolation=None)
+            files_read = parser.read(path, encoding="utf-8")
+            if path in existing_paths and not files_read:
+                continue
+            self._cfg_path = path
+            if files_read:
+                self._parser = parser
+                self.current_cfg_path = path
+            break
+        if self.current_cfg_path is None:
+            # Preserve settings when a read-only local file needs a new fallback.
+            for path in existing_paths:
+                parser = ConfigParser(interpolation=None)
+                if parser.read(path, encoding="utf-8"):
+                    self._parser = parser
+                    self.current_cfg_path = path
+                    break
         if "joydance" not in self._parser:
             self._parser["joydance"] = self.DEFAULT_CONFIG
         else:
@@ -166,11 +186,26 @@ class ConfigHandler:
                 self._parser["joydance"]["host_ip_addr"] = host_ip_addr
         return dict(self._parser["joydance"])
 
+    @staticmethod
+    def _can_write_config(path):
+        try:
+            if os.path.exists(path) and not os.access(path, os.R_OK | os.W_OK):
+                return False
+            directory = os.path.dirname(path)
+            os.makedirs(directory, exist_ok=True)
+            # Atomic replacement also needs permission to create files in the directory.
+            with tempfile.TemporaryFile(dir=directory):
+                pass
+            return True
+        except OSError:
+            return False
+
     def save_data(self):
         self.current_cfg_path = None
         self._parser["joydance"] = self._data
         self._parser["connections"] = {"items": json.dumps(self._connections)}
-        for config_path in self.cfg_paths:
+        config_path = self._cfg_path
+        if config_path is not None:
             config_folder = os.path.dirname(config_path)
             temporary_path = None
             try:
@@ -181,16 +216,14 @@ class ConfigHandler:
                     self._parser.write(fp)
                 os.replace(temporary_path, config_path)
                 self.current_cfg_path = config_path
-                # save to first path with access
                 return True
             except OSError:
                 pass
             finally:
                 if temporary_path and os.path.exists(temporary_path):
                     os.unlink(temporary_path)
-        else:
-            print(f'Failed to write config file to "{self.cfg_paths}"')
-            return False
+        print(f'Failed to write config file to "{config_path or self.cfg_paths}"')
+        return False
 
 
 def is_valid_pairing_code(val: str) -> bool:
@@ -247,9 +280,16 @@ def get_datadir() -> str:
     app_folder = "JoyDance"
 
     if sys.platform == "win32":
-        return os.path.join(home, "AppData", "Roaming", app_folder)
+        appdata = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
+        return os.path.join(appdata, app_folder)
     if sys.platform == "linux":
         return os.path.join(home, ".local", "share", app_folder)
     if sys.platform == "darwin":
         return os.path.join(home, "Library", "Application Support", app_folder)
     return os.path.join(home, app_folder)
+
+
+def get_config_paths(script_path: str) -> list[str]:
+    application_path = sys.executable if getattr(sys, "frozen", False) else script_path
+    local_path = os.path.join(os.path.dirname(os.path.abspath(application_path)), "config.cfg")
+    return [local_path, os.path.join(get_datadir(), "config.cfg")]
