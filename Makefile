@@ -1,7 +1,9 @@
 .PHONY: build clean
 
+PYTHON ?= python
+
 build: dance.py
-	pyinstaller --onefile --add-data "static:static" --icon="assets/favicon.ico" dance.py -n JoyDance
+	"$(PYTHON)" -m PyInstaller --onefile --add-data "static:static" --icon="assets/favicon.ico" --name JoyDance dance.py
 
 clean:
 	rm -rf build dist

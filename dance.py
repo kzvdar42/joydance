@@ -176,6 +176,9 @@ async def disconnect_controller(app, ws, data):
 
 
 async def on_startup(app):
+    # Windows redirects stdout using a legacy encoding that cannot print the banner.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(
         f"""
      ░░  ░░░░░░  ░░    ░░ ░░░░░░   ░░░░░  ░░░    ░░  ░░░░░░ ░░░░░░░
