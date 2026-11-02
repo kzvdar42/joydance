@@ -5,3 +5,5 @@ build/
 dist/
 *.spec
 *.ipynb
+research/
+just-dance-logs/

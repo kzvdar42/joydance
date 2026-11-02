@@ -5,7 +5,7 @@ import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
 
-const methodNames = {default:'Just Dance', fast:'Fast', stadia:'Stadia', old:'Legacy', jdmo:'JDMO 2021'};
+const methodNames = {default:'Just Dance', fast:'Fast', stadia:'Stadia', old:'Legacy', jdmo:'JDMO 2021', jd23:'JD23+'};
 const connectionKey = connection => usesPairingCode(connection.pairing_method) ? 'code:' + connection.pairing_code :
     connection.console_url || `${connection.pairing_method === PairingMethod.OLD ? 'ws' : 'wss'}://${connection.console_ip_addr}:8080/smartphone`;
 const connectionKeys = connection => connection.console_urls || [connectionKey(connection)];

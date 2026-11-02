@@ -4,10 +4,13 @@ export const PairingMethod = {
     STADIA: 'stadia',
     OLD: 'old',
     JDMO: 'jdmo',
+    JD23: 'jd23',
 }
 
 export const usesHostAddress = method => [PairingMethod.DEFAULT, PairingMethod.JDMO].includes(method)
-export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO].includes(method)
+export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO, PairingMethod.JD23].includes(method)
+export const isValidPairingCode = (code, method) => typeof code === 'string' &&
+    (method === PairingMethod.JD23 ? /^[A-Za-z0-9]{8}$/ : /^[0-9]{6}$/).test(code)
 
 export const WsCommand = {
     GET_CONNECTIONS: 'get_connections',

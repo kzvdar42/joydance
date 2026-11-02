@@ -129,6 +129,9 @@ class ConfigHandler:
             if not is_valid_ip_address(new_config.get("console_ip_addr", "")):
                 return False, f"Invalid console IP address: {new_config.get('console_ip_addr', '')}"
 
+        if method == PairingMethod.JD23.value and not is_valid_pairing_code(new_config.get("pairing_code", ""), method):
+            return False, "Invalid JD23+ pairing code (must be 8 letters or digits)."
+
         return True, ""
 
     @staticmethod
@@ -144,8 +147,10 @@ class ConfigHandler:
                     if not is_valid_ip_address(val):
                         val = ""
                 elif key == "pairing_code":
-                    if not is_valid_pairing_code(val):
+                    if not is_valid_pairing_code(val, new_config.get("pairing_method")):
                         val = ""
+                    elif new_config.get("pairing_method") == PairingMethod.JD23.value:
+                        val = val.upper()
                 validated_config[key] = val
         return validated_config
 
@@ -226,8 +231,12 @@ class ConfigHandler:
         return False
 
 
-def is_valid_pairing_code(val: str) -> bool:
-    return re.match(REGEX_PAIRING_CODE, val) is not None
+def is_valid_pairing_code(val: str, method=None) -> bool:
+    if not isinstance(val, str):
+        return False
+    if method == PairingMethod.JD23.value:
+        return re.fullmatch(r"[a-zA-Z0-9]{8}", val) is not None
+    return re.fullmatch(REGEX_PAIRING_CODE, val) is not None
 
 
 def is_valid_ip_address(val: str) -> bool:
@@ -249,6 +258,7 @@ def is_valid_pairing_method(val: str) -> bool:
         PairingMethod.STADIA.value,
         PairingMethod.OLD.value,
         PairingMethod.JDMO.value,
+        PairingMethod.JD23.value,
     }
 
 

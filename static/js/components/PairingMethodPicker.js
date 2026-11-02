@@ -18,7 +18,10 @@ export default class PairingMethodPicker extends Component {
         return html`
             <label for="stacked-state">Pairing Method</label>
             <select id="stacked-state" onChange=${this.onChange} value=${props.pairing_method}>
-                <optgroup label="JD 2020 and later">
+                <optgroup label="JD 2023 and later">
+                    <option value="${PairingMethod.JD23}">JD23+: Pairing code</option>
+                </optgroup>
+                <optgroup label="JD 2020-2022">
                     <option value="${PairingMethod.DEFAULT}">Default: All platforms except Stadia</option>
                     <option value="${PairingMethod.FAST}">Fast: Xbox One/PlayStation/Nintendo Switch</option>
                     <option value="${PairingMethod.STADIA}">Stadia: for Stadia, obviously</option>

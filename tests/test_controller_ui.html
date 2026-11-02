@@ -1,0 +1,189 @@
+<!doctype html>
+<!-- Copy into static/ and serve static/ to run this browser regression check. No hardware or live WebSocket is used. -->
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
+<script src="/js/mitt.umd.js"></script><title>Controller UI regression check</title></head>
+<body><script type="module">
+import { render } from '/js/preact.module.js';
+import { html } from '/js/utils.js';
+import { Controllers } from '/js/components/controller.js';
+import { WsCommand } from '/js/consts.js';
+
+window.CONFIG = {pairing_method:'default',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'123456'};
+window.VERSION = 'UI regression check';
+const sent = [];
+const sockets = [];
+window.WebSocket = class {
+    static OPEN = 1;
+    static CLOSED = 3;
+    constructor() { this.readyState = 1; window.testSocket = this; sockets.push(this); }
+    send(message) { sent.push(JSON.parse(message)); }
+    close() { this.readyState = 3; this.onclose?.({wasClean:true}); }
+};
+const controllers = [
+    {serial:'left',name:'JoyCon L',controller_type:'joycon_left',color:'#19bee4'},
+    {serial:'right',name:'JoyCon R',controller_type:'joycon_right',color:'#ef483e'},
+    {serial:'pro',name:'Pro Controller',controller_type:'pro_controller',color:'#383638',color_buttons:'#222'},
+].map(controller=>({...controller,state:0,battery_level:4}));
+const settle = () => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+const refresh = () => document.querySelector('.btn-refresh');
+const updateEvent = 'resp_' + WsCommand.UPDATE_CONTROLLER_STATE;
+const listeners = event => window.mitty.all.get(event)?.length || 0;
+const reply = list => window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_' + WsCommand.GET_CONTROLLER_LIST,data:list})});
+
+try {
+    await import('/js/app.js');
+    window.testSocket.onopen({});
+    reply(controllers);
+    await settle();
+    check(listeners(updateEvent) === 3, 'Each row must have one state listener');
+    for (const player_color of [undefined, null, []]) {
+        const jd23Controllers = controllers.map(controller => controller.serial === 'left' ? {
+            ...controller, state:4, player_name:'JD26 player', player_id:2, player_color,
+        } : controller);
+        reply(jd23Controllers);
+        await settle();
+        const leftRow = document.querySelector('[aria-label="Joy-Con left"]').closest('li');
+        check(document.querySelectorAll('.controllers-list li').length === 3, 'Missing player color must not hide the controller list');
+        check(leftRow.querySelector('.player-info').textContent.includes('P2: JD26 player'), 'JD23 player details must render without a color');
+        check(!leftRow.querySelector('.player-color'), 'Missing player color must omit only the swatch');
+        window.mitty.emit(updateEvent, {...jd23Controllers[0], state:102, error_details:'Test sign-in error'});
+        await settle();
+        check(leftRow.querySelector('.controller-state').textContent === 'Test sign-in error', 'An error with previous JD23 player details must remain visible');
+    }
+    reply(controllers);
+    await settle();
+    const icons = [...document.querySelectorAll('.controllers-list .controller-color')];
+    check(icons.map(icon=>icon.getAttribute('aria-label')).join(',') === 'Joy-Con left,Joy-Con right,Pro Controller', 'All icon variants must render');
+    check(icons[2].getBoundingClientRect().width === 48 && icons[2].getBoundingClientRect().height === 36, 'Pro icon size changed');
+
+    const requests = sent.length;
+    refresh().click();
+    await settle();
+    check(refresh().disabled && refresh().getAttribute('aria-busy') === 'true', 'Refresh must be disabled while pending');
+    refresh().click();
+    check(sent.length === requests + 1, 'Disabled Refresh must not send another request');
+    reply(controllers);
+    await settle();
+    check(!refresh().disabled, 'An unchanged controller list must finish refresh');
+
+    const proRow = document.querySelector('.controller-pro').closest('li');
+    const connectedControllers = controllers.map(controller => controller.serial === 'pro' ? {
+        ...controller,state:4,rumble_enabled:true,color:'#83ceb5',battery_level:1,
+        player_name:'Test player',player_id:1,player_color:[255,0,0,255],
+    } : controller);
+    refresh().click();
+    reply(connectedControllers);
+    await settle();
+    check(document.querySelector('.controller-pro').closest('li') === proRow, 'Refresh must reuse the existing controller row');
+    check(proRow.querySelector('.controller-state').textContent === 'Connected!', 'Fresh lists must update existing row status');
+    check(proRow.querySelector('.button-group').textContent.includes('Rumble On'), 'Fresh lists must update action buttons');
+    check(proRow.querySelector('svg path').getAttribute('fill') === '#83ceb5' && proRow.querySelector('.battery-level').classList.contains('critical'), 'Fresh lists must update colors and battery');
+    check(proRow.querySelector('.player-info').textContent.includes('Test player'), 'Fresh lists must update player details');
+    check(proRow.querySelector('.player-color'), 'Legacy player colors must still render');
+    window.mitty.emit(updateEvent, {...connectedControllers[2],player_id:2,is_main_player:true});
+    await settle();
+    check(proRow.querySelector('.player-role')?.textContent === 'Main' && proRow.querySelector('.player-info').textContent.includes('P2:'), 'Navigation takeover must show Main while preserving the game player number');
+    window.mitty.emit(updateEvent, {...connectedControllers[2],player_id:1,is_main_player:false});
+    await settle();
+    check(!proRow.querySelector('.player-role') && proRow.querySelector('.player-info').textContent.includes('P1:'), 'A returning player 1 must not show Main without navigation control');
+    window.mitty.emit(updateEvent, {...connectedControllers[2],state:10,is_main_player:true});
+    await settle();
+    check(!proRow.querySelector('.player-role'), 'Disconnected controllers must not show Main');
+    reply(controllers);
+    await settle();
+    check(proRow.querySelector('.controller-state').textContent === 'Idle' && !proRow.querySelector('.player-info'), 'New snapshots must clear omitted player details and restore Idle');
+    window.testSocket.onmessage({data:JSON.stringify({cmd:updateEvent,data:{...controllers[2],state:4,rumble_enabled:true}})});
+    await settle();
+    window.mitty.emit('update_code', '654321');
+    await settle();
+    check(proRow.querySelector('.controller-state').textContent === 'Connected!', 'Unrelated parent updates must preserve live controller state');
+    reply(controllers);
+    await settle();
+
+    refresh().click();
+    reply([]);
+    await settle();
+    check(!refresh().disabled && listeners(updateEvent) === 0, 'Empty response must finish refresh and remove row listeners');
+    for (let cycle = 0; cycle < 4; cycle++) {
+        reply(controllers);
+        await settle();
+        check(listeners(updateEvent) === 3, 'Remounted rows must not accumulate listeners');
+        reply([]);
+        await settle();
+        check(listeners(updateEvent) === 0, 'Removed rows must release listeners');
+    }
+    reply(controllers);
+    await settle();
+    window.mitty.emit(updateEvent, {...controllers[2],state:4,rumble_enabled:true,color:'#83ceb5'});
+    await settle();
+    check(document.querySelector('.controller-pro path').getAttribute('fill') === '#83ceb5', 'Extracted icon must receive updated colors');
+    document.querySelector('.button-group button:last-child').click();
+    check(sent.at(-1).cmd === WsCommand.TOGGLE_RUMBLE && sent.at(-1).data.enabled === false, 'Row actions must still work');
+
+    refresh().click();
+    await settle();
+    window.testSocket.readyState = 3;
+    window.mitty.emit('ws_disconnected');
+    await settle();
+    check(!refresh().disabled, 'Disconnection must finish refresh');
+    const beforeOffline = sent.length;
+    refresh().click();
+    await settle();
+    check(!refresh().disabled && sent.length === beforeOffline, 'An offline request must not leave Refresh disabled');
+
+    const oldSocket = window.testSocket;
+    const realTimeout = window.setTimeout;
+    const realClearTimeout = window.clearTimeout;
+    const retries = new Map();
+    let nextTimer = 1;
+    window.setTimeout = callback => { const id = nextTimer++; retries.set(id, callback); return id; };
+    window.clearTimeout = id => retries.delete(id);
+    try {
+        oldSocket.onerror({message:'test connection failure'});
+        oldSocket.onclose({wasClean:false});
+        check(retries.size === 1, 'Error followed by close must queue one retry');
+        const beforeRetry = sockets.length;
+        const [timer, retry] = [...retries][0];
+        retries.delete(timer);
+        retry();
+        check(sockets.length === beforeRetry + 1, 'One retry must create one replacement socket');
+        window.testSocket.onopen({});
+        oldSocket.onclose({wasClean:false});
+        oldSocket.onerror({message:'obsolete failure'});
+        oldSocket.onmessage({data:JSON.stringify({cmd:'resp_get_controller_list',data:[]})});
+        document.querySelector('.ws-status').click();
+        await settle();
+        check(retries.size === 0 && sockets.length === beforeRetry + 1, 'Old events and clicks on a connected status must not create more sockets');
+        check(document.querySelectorAll('.controllers-list li').length === 3, 'Old socket messages must be ignored');
+        reply(connectedControllers);
+        await settle();
+        check(document.querySelector('.controller-pro').closest('li').querySelector('.controller-state').textContent === 'Connected!', 'The list received after browser reconnection must update existing rows');
+        window.testSocket.close();
+        check(retries.size === 1, 'Current socket close must schedule recovery');
+        document.querySelector('.ws-status').click();
+        check(retries.size === 0 && sockets.length === beforeRetry + 2, 'Manual recovery must cancel the pending retry');
+        document.querySelector('.ws-status').click();
+        check(sockets.length === beforeRetry + 2, 'Repeated recovery clicks must reuse the active socket');
+        window.testSocket.close();
+        render(null, document.body);
+        check(retries.size === 0, 'Unmount must cancel the pending retry');
+    } finally {
+        window.setTimeout = realTimeout;
+        window.clearTimeout = realClearTimeout;
+    }
+
+    render(html`<${Controllers} controllers=${controllers} />`, document.body);
+    const beforeUnmount = listeners('ws_disconnected');
+    render(null, document.body);
+    check(listeners(updateEvent) === 0 && listeners('ws_disconnected') === beforeUnmount - 1, 'Unmount must release row and refresh listeners');
+    render(html`<div class="container controllers"><${Controllers} controllers=${controllers} /></div><p style="text-align:center">All UI regression checks passed.</p>`, document.body);
+    await settle();
+    document.body.dataset.testResult = 'passed';
+} catch (error) {
+    document.body.dataset.testResult = 'failed';
+    document.body.append(Object.assign(document.createElement('pre'), {textContent:error.stack}));
+    console.error(error);
+}
+</script></body></html>

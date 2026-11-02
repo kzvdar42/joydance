@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Serve with static/ mounted at / and this file at /tests/test_jd23_ui.html. No backend or console calls. -->
+<html><head><meta charset="utf-8"><title>JD23+ pairing check</title>
+<link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
+<script src="/js/mitt.umd.js"></script></head><body><script type="module">
+window.CONFIG = {pairing_method:'jd23',host_ip_addr:'',console_ip_addr:'',pairing_code:'ABCD1234'};
+window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'JD23+ console'}];
+window.VERSION = 'JD23+ pairing check';
+const requests = [], alerts = [];
+window.alert = message => alerts.push(message);
+window.WebSocket = class {
+    static OPEN = 1;
+    constructor() { this.readyState=1; }
+    send(message) { requests.push(JSON.parse(message)); }
+};
+const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+try {
+    await import('/js/app.js');
+    await settle();
+    document.querySelector('.connections-list button').click();
+    await settle();
+    check(document.querySelector('#stacked-state').value === 'jd23', 'Saved JD23+ selection missing');
+    check(!document.querySelector('#ipAddr'), 'JD23+ must not require a host IP');
+    const code = document.querySelector('#pairingCode');
+    check(code.maxLength === 8 && code.pattern === '[A-Za-z0-9]{8}', 'Eight-character code field missing');
+    code.value = 'abcd1234';
+    code.dispatchEvent(new Event('change', {bubbles:true}));
+    await settle();
+    check(document.querySelector('#pairingCode').value === 'ABCD1234', 'Code was not normalized');
+    window.mitty.emit('req_connect_controller', 'test-controller');
+    await settle();
+    const request = requests.find(item => item.cmd === 'connect_controller');
+    check(alerts.length === 0 && request?.data.pairing_code === 'ABCD1234' && request.data.pairing_method === 'jd23', 'Connect was blocked or sent the wrong protocol/code');
+    const result = document.createElement('p'); result.id='test-result';
+    result.textContent='PASS: saved JD23+ selection, no host IP, uppercase eight-character code, and connection request.';
+    document.body.append(result);
+} catch (error) {
+    const result=document.createElement('pre'); result.id='test-result'; result.textContent='FAIL: '+error.stack;
+    document.body.append(result); throw error;
+}
+</script></body></html>

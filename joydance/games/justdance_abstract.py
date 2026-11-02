@@ -377,17 +377,18 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     async def tick(self):
         sleep_duration = FRAME_DURATION
         frames = 0
+        previous_tick_state = None
         while True:
-            logger.debug(
-                "%s %s: Tick controller_is_connected - %s game_is_connected - %s start_accel - %s",
-                id(self.controller),
-                self.controller.serial,
-                self.controller.is_connected(),
-                self.is_connected,
-                self.should_start_accelerometer,
-            )
+            controller_connected = self.controller.is_connected()
+            tick_state = (controller_connected, self.is_connected, self.should_start_accelerometer)
+            if tick_state != previous_tick_state:
+                logger.debug(
+                    "%s: Tick state controller_connected=%s game_connected=%s scoring=%s",
+                    self.controller.serial, *tick_state,
+                )
+                previous_tick_state = tick_state
             # Disconnect if controller is not connected
-            if not self.controller.is_connected():
+            if not controller_connected:
                 await self.disconnect(should_reconnect=True)
                 return
             # Break if game is not connected

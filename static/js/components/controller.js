@@ -124,7 +124,9 @@ class Controller extends Component {
                         <span class="controller-state">${stateMessage}</span>
                         ${player_name && html`
                             <div class="player-info">
-                                <span class="player-color" style="background-color: rgba(${player_color[0]}, ${player_color[1]}, ${player_color[2]}, ${player_color[3]})"></span>
+                                ${Array.isArray(player_color) && player_color.length === 4 && html`
+                                    <span class="player-color" style="background-color: rgba(${player_color[0]}, ${player_color[1]}, ${player_color[2]}, ${player_color[3]})"></span>
+                                `}
                                 <span>P${player_id}: ${player_name}</span>
                                 ${controllerState == PairingState.CONNECTED && is_main_player && html`<span class="player-role">Main</span>`}
                                 ${additional_message && html`<span>${additional_message}</span>`}

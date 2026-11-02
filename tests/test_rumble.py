@@ -15,6 +15,7 @@ from joydance.controllers.joycon.pycon.constants import (
 )
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.justdance_2023 import JustDanceGame2023
 
 
 PLAY_SOUND = json.dumps({"__class": "JD_PlaySound_ConsoleCommandData", "soundIndex": 40})
@@ -205,6 +206,20 @@ class RumbleTests(unittest.IsolatedAsyncioTestCase):
             game.controller.stop_rumble.assert_called_once_with()
         finally:
             await game._stop_rumble()
+
+    async def test_jd23_menu_feedback_disconnect_stops_the_motor(self):
+        game = self.make_game(JustDanceGame2023)
+        self.addCleanup(game.controller.close)
+        self.addAsyncCleanup(game.disconnect, should_reconnect=False)
+        started = asyncio.Event()
+        game.controller.joycon.rumble_two_band.side_effect = lambda *args: started.set()
+        await game.send_message("NavigationBack")
+        await asyncio.wait_for(started.wait(), 1)
+        rumble = game._rumble_task
+        await game.disconnect(should_reconnect=False)
+        self.assertTrue(rumble.cancelled())
+        self.assertIsNone(game._rumble_task)
+        game.controller.stop_rumble.assert_called_once_with()
 
     async def test_connection_task_cancellation_stops_rumble(self):
         game = self.make_game(JustDanceGameV2)

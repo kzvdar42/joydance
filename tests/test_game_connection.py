@@ -49,6 +49,30 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         websocket.__aiter__.side_effect = messages
         return websocket
 
+    async def test_tick_logs_state_changes_instead_of_every_frame(self):
+        from joydance.games.justdance_abstract import logger
+
+        game = self.make_game(JustDanceGameV2)
+        game.disconnect = AsyncMock()
+        sleeps = 0
+
+        async def advance_frame(duration):
+            nonlocal sleeps
+            sleeps += 1
+            if sleeps == 3:
+                game.is_connected = True
+            elif sleeps == 6:
+                game.controller.is_connected.return_value = False
+
+        with patch("joydance.games.justdance_abstract.asyncio.sleep", side_effect=advance_frame):
+            await game.tick()
+        states = [call.args for call in logger.debug.call_args_list if call.args[0].startswith("%s: Tick state")]
+        self.assertEqual([args[2:] for args in states], [
+            (True, False, False), (True, True, False), (False, True, False),
+        ])
+        self.assertEqual(sleeps, 6)
+        game.disconnect.assert_awaited_once_with(should_reconnect=True)
+
     def http_session(self, status=200, body="OK", json_body=None):
         response = SimpleNamespace(status=status, text=AsyncMock(return_value=body), json=AsyncMock(return_value=json_body))
         request = MagicMock()

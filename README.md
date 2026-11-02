@@ -15,16 +15,18 @@
 https://youtu.be/f_1IkUHFdH8
 
 ## Features
-- Play Just Dance 2016-2022 on all platforms with Joy-Cons.
+- Play Just Dance 2016+ on all platforms with Joy-Cons.
 - Playing with a Joy-Con (+ its strap) is safer and more comfortable than holding a phone.
 - No latency.
 - Better score than using a phone (hopefully).
 - No random disconnection.
-- Support up to 6 players.
+- Support up to 6 players in JD2016-2022. JD23+ currently supports one controller per computer; connecting another will disconnect the first.
+- Rumble feedback for supported game events. JD23+ supports connection and menu feedback, but no Beat, star or Gold Move rumble.
 - Support all platforms:
 
 |              | Xbox Series | Xbox One | PS4/5 | NSW | Stadia | PC | Wii U |
 |--------------|:-----------:|:--------:|:-----:|:---:|:------:|:--:|:-----:|
+| 2023+        | ✅          |          | PS5   | ✅  |       |    |       |
 | 2020-2022    | ✅          | ✅       | ✅    | ✅  | ✅    |    |       |
 | 2016-2019    |             | ✅       | ✅    | ✅  |       | ✅ | ✅    |
 
@@ -121,13 +123,14 @@ pip3 install -r requirements.txt
       Multiple addresses for the same game on the JoyDance computer are grouped, preferring the configured host address. A saved entry matching any detected address is shown as **Saved · Local**.
 
     - **Pairing Method**:
-      |                    | Default        | Fast      | Stadia    | Old                   |
-      |--------------------|----------------|-----------|-----------|-----------------------|
-      | Platforms          | All but Stadia | X1/PS/NSW | Stadia    | All, incl. PC & Wii U |
-      | Game versions      | 2020-2022      | 2020-2022 | 2020-2022 | 2016-2019             |
-      | Pairing Speed      | Slow           | Fast      | Slow      | Fast                  |
-      | Pairing Code       | Require        |           | Require   |                       |
-      | Private IP Address | Host           | Console   |           | PC/Console            |
+
+      |                    | Default        | Fast      | Stadia    | Old                   | JDMO 2021          | JD23+             |
+      |--------------------|----------------|-----------|-----------|-----------------------|--------------------|-------------------|
+      | Platforms          | All but Stadia | X1/PS/NSW | Stadia    | All, incl. PC & Wii U | PC                 | XSX/S, PS5, NSW   |
+      | Game versions      | 2020-2022      | 2020-2022 | 2020-2022 | 2016-2019             | 2021 mod           | 2023+             |
+      | Pairing Speed      | Slow           | Fast      | Slow      | Fast                  | Varies             | Service-dependent |
+      | Pairing Code       | Require        |           | Require   |                       | Require (6 digits) | Require (8 chars) |
+      | Private IP Address | Host           | Console   |           | PC/Console            | Host               | Not required      |
 
     - **Host Private IP**:
       - The private IP address of your PC/Mac/Linux running JoyDance. Find this in the Wi-Fi settings.

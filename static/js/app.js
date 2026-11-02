@@ -4,7 +4,7 @@ import SearchInputField from '/js/components/SearchInputField.js';
 import WebSocketStatusIndicator from '/js/components/WebSocketStatusIndicator.js';
 import Connections from '/js/components/Connections.js';
 import { Controllers } from '/js/components/controller.js';
-import { WsCommand, isPrivateIPv4, isValidIPv4, usesHostAddress, usesPairingCode } from '/js/consts.js';
+import { PairingMethod, WsCommand, isPrivateIPv4, isValidIPv4, usesHostAddress, usesPairingCode, isValidPairingCode } from '/js/consts.js';
 
 window.mitty = mitt()
 
@@ -76,14 +76,14 @@ class App extends Component {
         }
         const pairing_method = state.pairing_method
         const addr = usesHostAddress(pairing_method) ? state.host_ip_addr : state.console_ip_addr
-        if (!isValidIPv4(addr)) {
+        if (pairing_method !== PairingMethod.JD23 && !isValidIPv4(addr)) {
             alert('ERROR: Invalid IP address!')
             return
         }
 
         if (usesPairingCode(pairing_method)) {
             const pairing_code = state.pairing_code
-            if (!pairing_code.match(/^\d{6}$/)) {
+            if (!isValidPairingCode(pairing_code, pairing_method)) {
                 alert('ERROR: Invalid pairing code!')
                 return
             }

@@ -22,6 +22,7 @@ from joydance.constants import (
 from joydance.controllers import update_controllers_list
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.justdance_2023 import JustDanceGame2023
 from joydance.games.discovery import discover_consoles
 from joydance.utils.network import normalize_console_url
 
@@ -112,6 +113,8 @@ async def connect_controller(app, ws, data) -> None:
         if not is_valid:
             logger.error(f"Configuration validation failed: {error_msg}")
             raise ValueError(f"Configuration validation failed: {error_msg}")
+        if pairing_method == PairingMethod.JD23.value:
+            pairing_code = pairing_code.upper()
 
         async with app["joydance_connection_locks"][serial]:
             config = app["config_handler"].data.copy()
@@ -121,7 +124,10 @@ async def connect_controller(app, ws, data) -> None:
             config["console_ip_addr"] = console_ip_addr
             app["config_handler"].data = config
 
-            if pairing_method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value, PairingMethod.JDMO.value}:
+            if pairing_method in {
+                PairingMethod.DEFAULT.value, PairingMethod.STADIA.value,
+                PairingMethod.JDMO.value, PairingMethod.JD23.value,
+            }:
                 app["controllers_info"][serial]["pairing_code"] = pairing_code
                 console_ip_addr = None
             else:
@@ -129,6 +135,8 @@ async def connect_controller(app, ws, data) -> None:
 
             if pairing_method == PairingMethod.OLD.value:
                 game_class = JustDanceGameV1
+            elif pairing_method == PairingMethod.JD23.value:
+                game_class = JustDanceGame2023
             else:
                 game_class = JustDanceGameV2
 

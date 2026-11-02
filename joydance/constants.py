@@ -60,6 +60,7 @@ class PairingMethod(Enum):
     STADIA = "stadia"
     OLD = "old"
     JDMO = "jdmo"
+    JD23 = "jd23"
 
 
 class UiLayer(Enum):
@@ -128,6 +129,12 @@ class Command(Enum):
     SHORTCUT_SEARCH = "SHORTCUT_SEARCH"
     SHORTCUT_EXTRA = "SHORTCUT_EXTRA"
     UPLOAD = "SHORTCUT_UPLOAD"
+    JD23_QUICK_CHAT = "JD23_QUICK_CHAT"
+    JD23_GROUP = "JD23_GROUP"
+    JD23_FULLSCREEN = "JD23_FULLSCREEN"
+    JD23_SWEAT = "JD23_SWEAT"
+    JD23_DECADES = "JD23_DECADES"
+    JD23_ACTIVITIES = "JD23_ACTIVITIES"
 
 
 V2_INPUT_MAPPING_KEYS = {
@@ -181,6 +188,7 @@ BUTTON_MAPPING = {
     ],
     JoyConButton.B: [Command.BACK],
     JoyConButton.X: [
+        Command.JD23_QUICK_CHAT,
         Command.DELETE_DANCERCARD,
         Command.DELETE_PLAYLIST,
         Command.GOTO_SONGSTAB,
@@ -197,6 +205,7 @@ BUTTON_MAPPING = {
         Command.ACTIVATE_DANCER_PROFILE,
     ],
     JoyConButton.Y: [
+        Command.JD23_GROUP,
         Command.SHORTCUT_EXTRA,
         # shortcut: no verified Switch binding for My Uploads; use Y until confirmed.
         Command.UPLOAD,
@@ -208,6 +217,7 @@ BUTTON_MAPPING = {
         Command.VIDEO_RESTART,
     ],
     JoyConButton.PLUS: [
+        Command.JD23_SWEAT,
         Command.DONT_SHOW_ANYMORE,
         Command.FAVORITE,
         Command.PLAYLIST_RENAME,
@@ -216,17 +226,19 @@ BUTTON_MAPPING = {
         Command.PAUSE,
     ],
     JoyConButton.R: [
+        Command.JD23_FULLSCREEN,
         Command.PLAYLIST_MOVE_SONG_LEFT,
         Command.TIPS_PREVIOUS,
         Command.TOGGLE_RUMBLE,
     ],
     JoyConButton.ZR: [
+        Command.JD23_DECADES,
         Command.PLAYLIST_MOVE_SONG_RIGHT,
         Command.TIPS_NEXT,
         Command.TOGGLE_RELATED_SONGS_AUTOPLAY,
         Command.NEXT_ACTION,
     ],
-    JoyConButton.RIGHT_STICK: [Command.TOGGLE_AUTOSCROLLING],
+    JoyConButton.RIGHT_STICK: [Command.JD23_ACTIVITIES, Command.TOGGLE_AUTOSCROLLING],
 }
 
 # Same with Joy-Con (L)

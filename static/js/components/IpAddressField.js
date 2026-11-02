@@ -34,6 +34,7 @@ export default class IpAddressField extends Component {
 
     render(props, state) {
         const pairing_method = props.pairing_method
+        if (pairing_method === PairingMethod.JD23) return null
         const hostAddress = usesHostAddress(pairing_method)
         const addr = hostAddress ? props.host_ip_addr : props.console_ip_addr
         return html`
