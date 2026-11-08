@@ -1,4 +1,4 @@
-from ..justdance_abstract import JustDanceGameAbstract
+from ..legacy_jd_pairing import LegacyJDGame
 from ..websocket_connection import JustDanceConnection
 from collections import defaultdict
 import json
@@ -17,7 +17,7 @@ from joydance.constants import (
 logger = logging.getLogger("joydance")
 
 
-class JustDanceGameV1(JustDanceGameAbstract):
+class JustDanceGameV1(LegacyJDGame):
     """
     Game protocol handler for Just Dance protocol version v1.
     Handles all v1-specific communication, message parsing, and command preprocessing.

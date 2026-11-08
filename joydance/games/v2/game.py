@@ -16,7 +16,7 @@ from joydance.constants import (
     JD_PING_INTERVAL,
     JD_PING_TIMEOUT,
 )
-from ..justdance_abstract import JustDanceGameAbstract
+from ..legacy_jd_pairing import LegacyJDGame
 from ..discovery import GAME_PORT
 from ..websocket_connection import JustDanceConnection
 from .jdmo_pairing import discover_jdmo_game
@@ -26,7 +26,7 @@ from joydance.utils.network import is_private_ipv4
 logger = logging.getLogger("joydance")
 
 
-class JustDanceGameV2(JustDanceGameAbstract):
+class JustDanceGameV2(LegacyJDGame):
     """
     Game protocol handler for Just Dance protocol version v2.
     Handles all v2-specific communication, message parsing, and command preprocessing.

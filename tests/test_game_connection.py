@@ -118,7 +118,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         game = self.make_game(JustDanceGameV2)
         with (
             patch("joydance.games.v2.game.discover_jdmo_game", new=AsyncMock()) as discover,
-            patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(
+            patch("joydance.games.legacy_jd_pairing.aiohttp.ClientSession", return_value=self.http_session(
                 json_body={"pairingUrl": "https://127.0.0.1:8080"},
             )),
         ):
@@ -198,7 +198,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(url=url):
                 game = self.make_game(JustDanceGameV2)
                 session = self.http_session(json_body={"pairingUrl": url, "requiresPunchPairing": "false"})
-                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+                with patch("joydance.games.legacy_jd_pairing.aiohttp.ClientSession", return_value=session):
                     await game.send_pairing_code()
                 self.assertEqual(game.pairing_url, expected)
                 self.assertFalse(game.requires_punch_pairing)
@@ -511,7 +511,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(method=method, status=status):
                 game = self.make_game(JustDanceGameV2)
-                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(status=status)):
+                with patch("joydance.games.legacy_jd_pairing.aiohttp.ClientSession", return_value=self.http_session(status=status)):
                     with self.assertRaises(GameConnectionError) as caught:
                         await getattr(game, method)()
                 await game._handle_connection_error(caught.exception)
@@ -527,7 +527,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(method=method):
                 game = self.make_game(JustDanceGameV2)
-                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(json_body=response)) as factory:
+                with patch("joydance.games.legacy_jd_pairing.aiohttp.ClientSession", return_value=self.http_session(json_body=response)) as factory:
                     await getattr(game, method)()
                 self.assertEqual(factory.call_args.kwargs["timeout"].total, JD_SERVICE_TIMEOUT)
 
@@ -537,7 +537,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                 game = self.make_game(game_class)
                 session = self.http_session()
                 session.__aenter__.side_effect = aiohttp.ClientConnectionError("Service offline")
-                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+                with patch("joydance.games.legacy_jd_pairing.aiohttp.ClientSession", return_value=session):
                     await game.pair()
                 self.assertEqual(game._state["state"], PairingState.ERROR_CONNECTION.value)
                 self.assertIn("Service offline", game._state["error_details"])
