@@ -1,0 +1,33 @@
+{
+    "methods": {
+        "default": {"address_field": "host_ip_addr", "code": "legacy"},
+        "fast": {"address_field": "console_ip_addr", "code": null},
+        "stadia": {"address_field": "host_ip_addr", "code": "legacy"},
+        "old": {"address_field": "console_ip_addr", "code": null},
+        "jdmo": {"address_field": "host_ip_addr", "code": "legacy"},
+        "jd23": {"address_field": null, "code": "jd23"},
+        "jdnow": {"address_field": null, "code": "jdnow"}
+    },
+    "codes": {
+        "legacy": {
+            "characters": "\\d",
+            "browser_characters": "\\p{Nd}",
+            "min_length": 6,
+            "max_length": 6,
+            "error": "Invalid pairing code (must be 6 digits): {code}"
+        },
+        "jd23": {
+            "characters": "[A-Za-z0-9]",
+            "min_length": 8,
+            "max_length": 8,
+            "uppercase": true,
+            "error": "Invalid JD23+ pairing code (must be 8 letters or digits)."
+        },
+        "jdnow": {
+            "characters": "[0-9]",
+            "min_length": 4,
+            "max_length": 9,
+            "error": "Invalid Just Dance Now Dance Room number (must be 4 to 9 digits)."
+        }
+    }
+}

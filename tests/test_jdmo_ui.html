@@ -6,6 +6,7 @@
 <body><script type="module">
 import { WsCommand, usesHostAddress, usesPairingCode } from '/js/consts.js';
 
+window.PAIRING_RULES = await (await fetch('/pairing_rules.json')).json();
 window.CONFIG = {pairing_method:'jdmo',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'012345'};
 window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'JDMO game'}];
 window.VERSION = 'JDMO pairing preview';
@@ -28,7 +29,7 @@ const change = async (selector, value) => {
 const connect = async () => { window.mitty.emit('req_' + WsCommand.CONNECT_CONTROLLER, 'test'); await settle(); };
 
 try {
-    for (const [method, host, code] of [['default',true,true],['fast',false,false],['stadia',false,true],['old',false,false],['jdmo',true,true]]) {
+    for (const [method, host, code] of [['default',true,true],['fast',false,false],['stadia',true,true],['old',false,false],['jdmo',true,true]]) {
         check(usesHostAddress(method) === host && usesPairingCode(method) === code, 'Pairing requirements changed for ' + method);
     }
     await import('/js/app.js');

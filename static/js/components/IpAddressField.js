@@ -1,6 +1,6 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
-import { PairingMethod, IpAddressRegex, isPrivateIPv4, usesHostAddress } from '/js/consts.js';
+import { IpAddressRegex, isPrivateIPv4, pairingAddressField, usesHostAddress } from '/js/consts.js';
 
 export default class IpAddressField extends Component {
     constructor(props) {
@@ -27,34 +27,24 @@ export default class IpAddressField extends Component {
     }
 
     componentDidMount() {
-        const host = this.state.lock_host ? window.location.hostname : this.props.host_ip_addr
-        const addr = usesHostAddress(this.props.pairing_method) ? host : this.props.console_ip_addr
-        this.props.onChange(addr)
+        const field = pairingAddressField(this.props.pairing_method)
+        if (field) {
+            const locked = usesHostAddress(this.props.pairing_method) && this.state.lock_host
+            this.props.onChange(locked ? window.location.hostname : this.props[field])
+        }
     }
 
     render(props, state) {
-        const pairing_method = props.pairing_method
-        if ([PairingMethod.JD23, PairingMethod.JDNOW].includes(pairing_method)) return null
-        const hostAddress = usesHostAddress(pairing_method)
-        const addr = hostAddress ? props.host_ip_addr : props.console_ip_addr
+        const field = pairingAddressField(props.pairing_method)
+        if (!field) return null
+        const hostAddress = usesHostAddress(props.pairing_method)
+        const locked = hostAddress && state.lock_host
         return html`
-            <label for="ipAddr">
-                ${(hostAddress || pairing_method == PairingMethod.STADIA) && html`Host Private IP`}
-                ${(!hostAddress && pairing_method != PairingMethod.STADIA) && html`Console Private IP`}
-            </label>
-
-            ${(pairing_method == PairingMethod.STADIA) && html`
-                <input readonly id="ipAddr" type="text" size="15" placeholder="Not Required" />
-            `}
-
-            ${(hostAddress && state.lock_host) && html`
-                <input readonly id="ipAddr" type="text" size="15" value=${addr} />
-            `}
-
-            ${([PairingMethod.FAST, PairingMethod.OLD].indexOf(pairing_method) > -1 || (hostAddress && !state.lock_host)) && html`
-                <input required id="ipAddr" type="text" inputmode="decimal" size="15" maxlength="15" placeholder="e.g. 172.16.0.2" pattern="${IpAddressRegex.HTML_PATTERN}" value=${addr} onKeyPress=${this.onKeyPress} onChange="${this.onChange}" />
-            `}
-
+            <label for="ipAddr">${hostAddress ? 'Host Private IP' : 'Console Private IP'}</label>
+            <input id="ipAddr" type="text" inputmode="decimal" size="15" maxlength="15"
+                required=${!locked} readonly=${locked} placeholder="e.g. 172.16.0.2"
+                pattern=${IpAddressRegex.HTML_PATTERN} value=${props[field]}
+                onKeyPress=${this.onKeyPress} onChange=${this.onChange} />
         `
     }
 }

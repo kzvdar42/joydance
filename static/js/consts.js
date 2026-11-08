@@ -8,10 +8,17 @@ export const PairingMethod = {
     JDNOW: 'jdnow',
 }
 
-export const usesHostAddress = method => [PairingMethod.DEFAULT, PairingMethod.JDMO].includes(method)
-export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO, PairingMethod.JD23, PairingMethod.JDNOW].includes(method)
-export const isValidPairingCode = (code, method) => typeof code === 'string' &&
-    (method === PairingMethod.JD23 ? /^[A-Za-z0-9]{8}$/ : method === PairingMethod.JDNOW ? /^[0-9]{4,9}$/ : /^[0-9]{6}$/).test(code)
+export const pairingAddressField = method => window.PAIRING_RULES?.methods[method]?.address_field
+export const usesHostAddress = method => pairingAddressField(method) === 'host_ip_addr'
+export const pairingCodeRule = method => window.PAIRING_RULES?.codes[window.PAIRING_RULES.methods[method]?.code]
+export const usesPairingCode = method => Boolean(pairingCodeRule(method))
+export const pairingCodeCharacters = rule => rule.browser_characters ?? rule.characters
+export const pairingCodePattern = rule => pairingCodeCharacters(rule) + (rule.min_length === rule.max_length
+    ? `{${rule.max_length}}` : `{${rule.min_length},${rule.max_length}}`)
+export const isValidPairingCode = (code, method) => {
+    const rule = pairingCodeRule(method)
+    return typeof code === 'string' && Boolean(rule) && new RegExp(`^${pairingCodePattern(rule)}$`, 'u').exec(code)?.[0] === code
+}
 
 export const WsCommand = {
     GET_CONNECTIONS: 'get_connections',

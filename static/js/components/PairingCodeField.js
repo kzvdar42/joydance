@@ -1,6 +1,6 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
-import { PairingMethod, usesPairingCode } from '/js/consts.js';
+import { PairingMethod, pairingCodeCharacters, pairingCodePattern, pairingCodeRule } from '/js/consts.js';
 
 export default class PairingCodeField extends Component {
     constructor(props) {
@@ -9,26 +9,26 @@ export default class PairingCodeField extends Component {
     }
 
     onChange(e) {
-        const value = this.props.pairing_method === PairingMethod.JD23 ? e.target.value.toUpperCase() : e.target.value
+        const rule = pairingCodeRule(this.props.pairing_method)
+        const value = rule?.uppercase ? e.target.value.toUpperCase() : e.target.value
         this.props.onChange(value)
     }
 
     render(props) {
-        const requiresCode = usesPairingCode(props.pairing_method)
-        const jd23 = props.pairing_method === PairingMethod.JD23
+        const rule = pairingCodeRule(props.pairing_method)
         const jdnow = props.pairing_method === PairingMethod.JDNOW
+        const characters = rule && new RegExp(`^${pairingCodeCharacters(rule)}$`, 'u')
         return html`
             <label for="pairingCode">${jdnow ? 'Dance Room number' : 'Pairing Code'}</label>
-            ${requiresCode && html`
+            ${rule && html`
                 <input required id="pairingCode" type="text"
-                    inputmode=${jd23 ? 'text' : 'decimal'} autocapitalize="characters" spellcheck="false"
-                    value=${props.pairing_code} placeholder=${jd23 ? 'ABCD1234' : jdnow ? 'e.g. 34017' : '000000'}
-                    maxlength=${jd23 ? 8 : jdnow ? 9 : 6} size=${jd23 ? 8 : jdnow ? 9 : 6}
-                    pattern=${jd23 ? '[A-Za-z0-9]{8}' : jdnow ? '[0-9]{4,9}' : '[0-9]{6}'}
-                    onKeyPress=${(e) => e.key.length === 1 && !(jd23 ? /[A-Za-z0-9]/ : /[0-9]/).test(e.key) && e.preventDefault()}
+                    inputmode=${rule.uppercase ? 'text' : 'decimal'} autocapitalize="characters" spellcheck="false"
+                    value=${props.pairing_code} placeholder=${rule.uppercase ? 'ABCD1234' : jdnow ? 'e.g. 34017' : '000000'}
+                    maxlength=${rule.max_length} size=${rule.max_length} pattern=${pairingCodePattern(rule)}
+                    onKeyPress=${e => e.key.length === 1 && !characters.test(e.key) && e.preventDefault()}
                     onChange=${this.onChange} />
             `}
-            ${!requiresCode && html`
+            ${!rule && html`
                 <input type="text" id="pairingCode" value="" readonly placeholder="Not Required" size="12" />
             `}
         `

@@ -3,6 +3,7 @@
 <html><head><meta charset="utf-8"><title>JD23+ pairing check</title>
 <link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
 <script src="/js/mitt.umd.js"></script></head><body><script type="module">
+window.PAIRING_RULES = await (await fetch('/pairing_rules.json')).json();
 window.CONFIG = {pairing_method:'jd23',host_ip_addr:'',console_ip_addr:'',pairing_code:'ABCD1234'};
 window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'JD23+ console'}];
 window.VERSION = 'JD23+ pairing check';

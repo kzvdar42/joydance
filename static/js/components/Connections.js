@@ -1,6 +1,6 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
-import { PairingMethod, WsCommand, isPrivateIPv4, usesHostAddress, usesPairingCode } from '/js/consts.js';
+import { PairingMethod, WsCommand, isPrivateIPv4, pairingAddressField, usesPairingCode } from '/js/consts.js';
 import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
@@ -176,7 +176,7 @@ export default class Connections extends Component {
                                     <input required id="connectionName" maxlength="80" value=${draft.name} placeholder="e.g. Living room" onChange=${event => this.changeDraft('name', event.target.value)} />
                                 </div>
                                 <div class="pure-u-1"><${PairingMethodPicker} pairing_method=${draft.pairing_method} onChange=${value => this.changeDraft('pairing_method', value)} /></div>
-                                <div class="pure-u-1-2"><${IpAddressField} ...${draft} onChange=${value => this.changeDraft(usesHostAddress(draft.pairing_method) ? 'host_ip_addr' : 'console_ip_addr', value)} /></div>
+                                <div class="pure-u-1-2"><${IpAddressField} ...${draft} onChange=${value => this.changeDraft(pairingAddressField(draft.pairing_method), value)} /></div>
                                 <div class="pure-u-1-2"><${PairingCodeField} ...${draft} onChange=${value => this.changeDraft('pairing_code', value)} /></div>
                             </div>
                             ${state.error && html`<p class="connection-error" role="alert">${state.error}</p>`}

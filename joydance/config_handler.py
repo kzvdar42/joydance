@@ -7,6 +7,7 @@ import ipaddress
 import json
 import tempfile
 from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ from .constants import PairingMethod
 from .utils.network import is_private_ipv4, normalize_console_url
 
 
-REGEX_PAIRING_CODE = re.compile(r"^\d{6}$")
+PAIRING_RULES = json.loads((Path(__file__).resolve().parents[1] / "static" / "pairing_rules.json").read_text(encoding="utf-8"))
 JDNOW_PLAYER_ID = re.compile(r"[A-Za-z0-9_-]{16,128}")
 JDNOW_LINKED_OWNER = "@ubisoft"
 
@@ -213,21 +214,19 @@ class ConfigHandler:
         if not is_valid_pairing_method(method):
             return False, f"Invalid pairing method: {method}"
 
-        if method in {PairingMethod.DEFAULT.value, PairingMethod.STADIA.value, PairingMethod.JDMO.value}:
-            if not is_valid_ip_address(new_config.get("host_ip_addr", "")):
-                return False, f"Invalid host IP address: {new_config.get('host_ip_addr', '')}"
-            if not is_valid_pairing_code(new_config.get("pairing_code", "")):
-                return False, f"Invalid pairing code (must be 6 digits): {new_config.get('pairing_code', '')}"
+        rule = PAIRING_RULES["methods"][method]
+        address_field = rule["address_field"]
+        if address_field:
+            address = new_config.get(address_field, "")
+            if not is_valid_ip_address(address):
+                return False, f"Invalid {address_field.split('_', 1)[0]} IP address: {address}"
 
-        if method in {PairingMethod.FAST.value, PairingMethod.OLD.value}:
-            if not is_valid_ip_address(new_config.get("console_ip_addr", "")):
-                return False, f"Invalid console IP address: {new_config.get('console_ip_addr', '')}"
-
-        if method == PairingMethod.JD23.value and not is_valid_pairing_code(new_config.get("pairing_code", ""), method):
-            return False, "Invalid JD23+ pairing code (must be 8 letters or digits)."
-
-        if method == PairingMethod.JDNOW.value and not is_valid_pairing_code(new_config.get("pairing_code", ""), method):
-            return False, "Invalid Just Dance Now Dance Room number (must be 4 to 9 digits)."
+        code_type = rule["code"]
+        if code_type:
+            code = new_config.get("pairing_code", "")
+            if not is_valid_pairing_code(code, method):
+                error = PAIRING_RULES["codes"][code_type]["error"]
+                return False, error.format(code=code)
 
         return True, ""
 
@@ -246,8 +245,8 @@ class ConfigHandler:
                 elif key == "pairing_code":
                     if not is_valid_pairing_code(val, new_config.get("pairing_method")):
                         val = ""
-                    elif new_config.get("pairing_method") == PairingMethod.JD23.value:
-                        val = val.upper()
+                    else:
+                        val = normalize_pairing_code(val, new_config.get("pairing_method"))
                 validated_config[key] = val
         return validated_config
 
@@ -328,14 +327,20 @@ class ConfigHandler:
         return False
 
 
+def _pairing_code_rule(method):
+    # Older saved settings can have a six-digit code even when their method uses an IP.
+    rule = PAIRING_RULES["methods"].get(method, {}) if isinstance(method, str) else {}
+    return PAIRING_RULES["codes"][rule.get("code") or "legacy"]
+
+
 def is_valid_pairing_code(val: str, method=None) -> bool:
-    if not isinstance(val, str):
-        return False
-    if method == PairingMethod.JD23.value:
-        return re.fullmatch(r"[a-zA-Z0-9]{8}", val) is not None
-    if method == PairingMethod.JDNOW.value:
-        return re.fullmatch(r"[0-9]{4,9}", val) is not None
-    return re.fullmatch(REGEX_PAIRING_CODE, val) is not None
+    rule = _pairing_code_rule(method)
+    return (isinstance(val, str) and rule["min_length"] <= len(val) <= rule["max_length"]
+            and re.fullmatch(rule["characters"] + "+", val) is not None)
+
+
+def normalize_pairing_code(code, method):
+    return code.upper() if _pairing_code_rule(method).get("uppercase") else code
 
 
 def is_valid_ip_address(val: str) -> bool:
@@ -351,15 +356,7 @@ def is_valid_ip_address(val: str) -> bool:
 
 
 def is_valid_pairing_method(val: str) -> bool:
-    return val in {
-        PairingMethod.DEFAULT.value,
-        PairingMethod.FAST.value,
-        PairingMethod.STADIA.value,
-        PairingMethod.OLD.value,
-        PairingMethod.JDMO.value,
-        PairingMethod.JD23.value,
-        PairingMethod.JDNOW.value,
-    }
+    return isinstance(val, str) and val in PAIRING_RULES["methods"]
 
 
 def get_host_ip() -> str | None:

@@ -5,6 +5,7 @@ from functools import partial
 import json
 import logging
 import os
+import re
 import sys
 import mimetypes
 import argparse
@@ -18,7 +19,7 @@ if __name__ == "__main__":
 import aiohttp
 from aiohttp import WSMsgType, web
 
-from joydance.config_handler import ConfigHandler, get_config_paths
+from joydance.config_handler import PAIRING_RULES, ConfigHandler, get_config_paths, normalize_pairing_code
 from joydance.constants import (
     WsCommand,
     PairingState,
@@ -142,13 +143,8 @@ async def connect_controller(app, ws, data) -> None:
         if not is_valid:
             logger.error(f"Configuration validation failed: {error_msg}")
             raise ValueError(f"Configuration validation failed: {error_msg}")
-        if pairing_method == PairingMethod.JD23.value:
-            pairing_code = pairing_code.upper()
-
-        uses_pairing_code = pairing_method in {
-            PairingMethod.DEFAULT.value, PairingMethod.STADIA.value,
-            PairingMethod.JDMO.value, PairingMethod.JD23.value, PairingMethod.JDNOW.value,
-        }
+        pairing_code = normalize_pairing_code(pairing_code, pairing_method)
+        uses_pairing_code = PAIRING_RULES["methods"][pairing_method]["code"] is not None
         async with app["joydance_connection_locks"][serial]:
             if is_jdnow:
                 player_id = config_handler.get_jdnow_player_id(serial, data.get("jdnow_guest"))
@@ -280,13 +276,20 @@ Running version {JOYDANCE_VERSION}"""
 
 
 async def html_handler(request):
-    config = request.app["config_handler"].data
+    config_handler = request.app["config_handler"]
+    values = {
+        "CONFIG": config_handler.data,
+        "CONNECTIONS": config_handler.connections,
+        "PAIRING_RULES": PAIRING_RULES,
+        "VERSION": JOYDANCE_VERSION,
+    }
     with open(get_static_path("static/index.html"), "r", encoding="utf-8") as f:
-        html = f.read()
-        html = html.replace("[[CONFIG]]", json.dumps(config))
-        html = html.replace("[[CONNECTIONS]]", json.dumps(request.app["config_handler"].connections).replace("<", "\\u003c"))
-        html = html.replace("[[VERSION]]", JOYDANCE_VERSION)
-        return web.Response(text=html, content_type="text/html")
+        html = re.sub(
+            r"\[\[(CONFIG|CONNECTIONS|PAIRING_RULES|VERSION)\]\]",
+            lambda match: json.dumps(values[match[1]]).replace("<", "\\u003c"),
+            f.read(),
+        )
+    return web.Response(text=html, content_type="text/html")
 
 
 async def discovery_handler(request):

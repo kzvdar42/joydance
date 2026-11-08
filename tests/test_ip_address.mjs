@@ -8,6 +8,7 @@ import { createContext, SourceTextModule } from 'node:vm';
 const staticRoot = fileURLToPath(new URL('../static/', import.meta.url));
 const events = [];
 const window = { location: { hostname: '' }, mitty: { emit: (...args) => events.push(args) } };
+window.PAIRING_RULES = JSON.parse(readFileSync(resolve(staticRoot, 'pairing_rules.json'), 'utf8'));
 const context = createContext({ window });
 const modules = new Map();
 const load = path => {
@@ -50,13 +51,14 @@ for (const [hostname, privateAddress] of [
     ['10.1.2.999', false], ['10.01.2.3', false], ['10.1.2.3\n', false],
     ['::1', false], ['[::1]', false], ['fc00::1', false], ['', false],
 ]) {
-    for (const method of ['default', 'jdmo', 'fast']) {
+    for (const method of ['default', 'stadia', 'jdmo', 'fast', 'old']) {
         window.location.hostname = hostname;
         const field = new IpAddressField({ ...props, pairing_method: method });
         const expected = privateAddress ? hostname : props.host_ip_addr;
         assert.equal(field.state.lock_host, privateAddress, hostname);
         field.componentDidMount();
-        assert.deepEqual(events.pop(), ['update_addr', method === 'fast' ? props.console_ip_addr : expected]);
+        const consoleMethod = method === 'fast' || method === 'old';
+        assert.deepEqual(events.pop(), ['update_addr', consoleMethod ? props.console_ip_addr : expected]);
     }
 }
 console.log('PASS: IPv4 validation, HTML pattern, private address detection, and host/console selection.');

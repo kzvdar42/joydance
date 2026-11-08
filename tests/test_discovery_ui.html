@@ -4,6 +4,7 @@
 <link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
 <script src="/js/mitt.umd.js"></script><title>Connections regression check</title></head>
 <body><script type="module">
+window.PAIRING_RULES = await (await fetch('/pairing_rules.json')).json();
 window.CONFIG = {pairing_method:'default',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'123456'};
 window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'Previous connection'}];
 window.VERSION = 'Connections preview';

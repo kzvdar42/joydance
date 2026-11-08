@@ -9,7 +9,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 import dance
-from joydance.config_handler import ConfigHandler
+from joydance.config_handler import PAIRING_RULES, ConfigHandler
 
 
 class SavedConnectionsApiTests(unittest.IsolatedAsyncioTestCase):
@@ -67,12 +67,15 @@ class SavedConnectionsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 503)
         self.assertEqual(self.config.connections, [])
 
-    async def test_connection_names_cannot_escape_the_bootstrap_script(self):
-        entry = {**self.entry, "name": "</script><script>alert('name')</script>"}
-        response = await self.client.post("/connections", json=entry)
-        self.assertEqual(response.status, 200)
+    async def test_bootstrap_preserves_connection_names_and_pairing_rules(self):
+        names = ["</script><script>alert('name')</script>", "[[CONFIG]] [[CONNECTIONS]] [[PAIRING_RULES]] [[VERSION]]"]
+        for name in names:
+            response = await self.client.post("/connections", json={**self.entry, "name": name})
+            self.assertEqual(response.status, 200)
         response = await self.client.get("/")
         source = await response.text()
-        self.assertNotIn(entry["name"], source)
+        self.assertNotIn(names[0], source)
         match = re.search(r"window.CONNECTIONS = (.*?); window.VERSION", source)
-        self.assertEqual(json.loads(match.group(1))[0]["name"], entry["name"])
+        self.assertEqual([entry["name"] for entry in json.loads(match.group(1))], names)
+        match = re.search(r"window.PAIRING_RULES = (.*?); window.CONFIG", source)
+        self.assertEqual(json.loads(match.group(1)), PAIRING_RULES)

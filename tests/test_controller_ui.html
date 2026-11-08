@@ -9,6 +9,7 @@ import { html } from '/js/utils.js';
 import { Controllers } from '/js/components/controller.js';
 import { WsCommand } from '/js/consts.js';
 
+window.PAIRING_RULES = await (await fetch('/pairing_rules.json')).json();
 window.CONFIG = {pairing_method:'default',host_ip_addr:'192.168.1.2',console_ip_addr:'192.168.1.3',pairing_code:'123456'};
 window.VERSION = 'UI regression check';
 const sent = [];

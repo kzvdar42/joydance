@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { createContext, SourceTextModule } from 'node:vm';
 
 const root = fileURLToPath(new URL('../static/', import.meta.url));
-const context = createContext({window: {location: {hostname: 'localhost'}}});
+const pairingRules = JSON.parse(readFileSync(resolve(root, 'pairing_rules.json'), 'utf8'));
+const context = createContext({window: {location: {hostname: 'localhost'}, PAIRING_RULES: pairingRules}});
 const modules = new Map();
 const load = path => {
     if (!modules.has(path)) modules.set(path, new SourceTextModule(readFileSync(path, 'utf8'), {context, identifier:path}));
@@ -34,6 +35,7 @@ for (const [value, valid] of [
     assert.equal(isValidPairingCode(value, 'jd23'), valid, value);
 }
 assert.equal(isValidPairingCode('012345', 'default'), true);
+assert.equal(isValidPairingCode('٠١٢٣٤٥', 'stadia'), true);
 assert.equal(isValidPairingCode('ABCD1234', 'default'), false);
 for (const ending of ['\n', '\r', '\r\n', '\u2028', '\u2029']) {
     assert.equal(isValidPairingCode('012345' + ending, 'default'), false);
@@ -50,9 +52,16 @@ field.onChange({target:{value:'abcd1234'}});
 assert.equal(updated, 'ABCD1234');
 const old = input(field.render({...props, pairing_method:'default'})).props;
 assert.equal(old.maxlength, 6);
-assert.equal(old.pattern, '[0-9]{6}');
+assert.equal(old.pattern, '\\p{Nd}{6}');
 const Address = get('IpAddressField');
 assert.equal(new Address(props).render(props, {}), null);
+const stadiaProps = {...props, pairing_method:'stadia', host_ip_addr:'192.168.1.2', console_ip_addr:'192.168.1.3'};
+const stadiaAddress = input(new Address(stadiaProps).render(stadiaProps, {lock_host:false})).props;
+assert.equal(stadiaAddress.value, stadiaProps.host_ip_addr);
+assert.equal(stadiaAddress.required, true);
+assert.equal(stadiaAddress.readonly, false);
+assert.equal(usesHostAddress('stadia'), true);
+assert.equal(usesPairingCode('stadia'), true);
 const Picker = get('PairingMethodPicker');
 assert(nodes(new Picker(props).render(props)).some(node => node?.type === 'option' && node.props.value === 'jd23'));
 console.log('PASS: JD23+ pairing selection, eight-character codes, uppercase input, no host-address field, legacy code validation.');
