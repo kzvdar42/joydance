@@ -24,9 +24,10 @@ from websockets.protocol import State
 
 from joydance.config_handler import ConfigHandler, is_valid_pairing_code
 from joydance.constants import Command, PairingState
-from joydance.games.harbour_connection import HarbourConnection, HarbourProtocol
-from joydance.games.jd23_auth import EFDS_BUILD_KEY, JD23Pairing, efds_ticket, mobile_token, server_info_url
-from joydance.games.justdance_2023 import JustDanceGame2023
+from joydance.games.factory import create_game
+from joydance.games.jd23.connection import HarbourConnection, HarbourProtocol
+from joydance.games.jd23.auth import EFDS_BUILD_KEY, JD23Pairing, efds_ticket, mobile_token, server_info_url
+from joydance.games.jd23.game import JustDanceGame2023
 from joydance.utils import GameConnectionError
 
 
@@ -54,13 +55,13 @@ class JD23ConfigTests(unittest.TestCase):
 
 class JD23AuthTests(unittest.IsolatedAsyncioTestCase):
     def test_token_matches_frozen_apk_model_fixture(self):
-        with (patch("joydance.games.jd23_auth.SDK_APPLICATION_ID", "11111111-2222-3333-4444-555555555555"),
-              patch("joydance.games.jd23_auth.SDK_SIGNING_KEY", b"synthetic-key")):
+        with (patch("joydance.games.jd23.auth.SDK_APPLICATION_ID", "11111111-2222-3333-4444-555555555555"),
+              patch("joydance.games.jd23.auth.SDK_SIGNING_KEY", b"synthetic-key")):
             self.assertEqual(mobile_token("00112233-4455-6677-8899-aabbccddeeff", 1793318400, 0),
                              "UbiMobile_v2 t=MDAxMTIyMzMtNDQ1NS02Njc3LTg4OTktYWFiYmNjZGRlZWZmOlpFakhhTHRTdldsVDBqUXNwOWdOZEVaNllWZzZSSmwvd0lYRmtwSmRnZU09OjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NTpSM1ZsYzNSZmFFNTZjR2RoOk1qQXlOaTB4TUMwek1GUXdNRG93TUZvPQ==")
 
     def test_efds_envelope_matches_long_scrambled_reference_fixture(self):
-        with patch("joydance.games.jd23_auth.EFDS_BUILD_KEY", bytes(range(32))):
+        with patch("joydance.games.jd23.auth.EFDS_BUILD_KEY", bytes(range(32))):
             self.assertEqual(efds_ticket("X" * 100, b"12345678", 1793318400),
                              "Efds_v1 xddcjhmxbTpAwOALbj2EyJU6zyxL+1RaMLVnolksSiO7jnFiCLr7OSR+vFd8AXQXmcLu7d70rLjWs0ykWsUwk68XUVtK4GpCX484h68aLscTSx1DpDSCsdL9Sovs0rVK9FsZ64rJER7pe49nDKeC5yAdsFOgw20xMjM0NTY3OIiQmKDCU2bA")
 
@@ -104,7 +105,7 @@ class JD23AuthTests(unittest.IsolatedAsyncioTestCase):
 
         session.request.side_effect = request
         on_pairing = AsyncMock()
-        with patch("joydance.games.jd23_auth.aiohttp.ClientSession", return_value=session) as client_session:
+        with patch("joydance.games.jd23.auth.aiohttp.ClientSession", return_value=session) as client_session:
             result = await pairing.pair("ABCD1234", on_pairing)
         self.assertEqual(client_session.call_args.kwargs["headers"]["User-Agent"],
                          "UbiServices_SDK_Unity_2024.Release.18_ANDROID64_dynamic")
@@ -265,7 +266,7 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verified_feedback_triggers_once_on_join_and_on_menu_shortcuts(self):
         game = self.make_game()
-        with self.assertLogs("joydance.games.justdance_2023", level="DEBUG") as logs:
+        with self.assertLogs("joydance.games.jd23.game", level="DEBUG") as logs:
             await self.handshake(game)
             await game._rumble_task
         game.controller.handle_rumble_on_sound_index.assert_awaited_once_with(8)
@@ -367,7 +368,7 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
 
         game.ws.send.side_effect = stop
         game.ws.send.reset_mock()
-        with self.assertLogs("joydance.games.justdance_2023", level="DEBUG") as logs:
+        with self.assertLogs("joydance.games.jd23.game", level="DEBUG") as logs:
             await game.send_accelerometer_data(0)
         self.assertEqual(game.ws.send.await_count, 1)
         self.assertTrue(any("completed_after_stop batches=1 samples=10" in line for line in logs.output))
@@ -388,7 +389,7 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
         game._last_pong = time_zero = 100
         game._last_ping = time_zero
         task = None
-        with patch("joydance.games.justdance_2023.time", SimpleNamespace(monotonic=lambda: 102)):
+        with patch("joydance.games.jd23.game.time", SimpleNamespace(monotonic=lambda: 102)):
             task = asyncio.create_task(game._heartbeat())
             await asyncio.sleep(0)
             task.cancel()
@@ -400,7 +401,7 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_command_logs_include_unknown_feedback_without_private_payloads_or_ping_spam(self):
         game = self.make_game()
-        with self.assertLogs("joydance.games.justdance_2023", level="DEBUG") as logs:
+        with self.assertLogs("joydance.games.jd23.game", level="DEBUG") as logs:
             await self.receive(game, "Connect_HandshakeBackFromServer", "0", 0)
             await self.receive(game, "Connect_HandshakeOKFromServerAsGuest", "Private Player/false/HandDevice/1", 0)
             await self.receive(game, "Request_EnableNavigation", "true")
@@ -424,8 +425,8 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
     async def test_motion_logs_aggregate_successful_batches_and_report_empty_frames_and_stop(self):
         game = self.make_game()
         clock = [100.0]
-        with (patch("joydance.games.justdance_2023.time", SimpleNamespace(monotonic=lambda: clock[0])),
-              self.assertLogs("joydance.games.justdance_2023", level="DEBUG") as logs):
+        with (patch("joydance.games.jd23.game.time", SimpleNamespace(monotonic=lambda: clock[0])),
+              self.assertLogs("joydance.games.jd23.game", level="DEBUG") as logs):
             game._set_scoring(True)
             game.accel_data = [(98765.25, -98765.25, 0)] * 23
             await game.send_accelerometer_data(1)
@@ -451,8 +452,8 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
     async def test_motion_logs_zero_samples_when_empty_and_exclude_closed_or_failed_sends(self):
         game = self.make_game()
         clock = [100.0]
-        with (patch("joydance.games.justdance_2023.time", SimpleNamespace(monotonic=lambda: clock[0])),
-              self.assertLogs("joydance.games.justdance_2023", level="DEBUG") as logs):
+        with (patch("joydance.games.jd23.game.time", SimpleNamespace(monotonic=lambda: clock[0])),
+              self.assertLogs("joydance.games.jd23.game", level="DEBUG") as logs):
             game._set_scoring(True)
             clock[0] = 101.0
             await game.send_accelerometer_data(1)
@@ -493,14 +494,14 @@ class JD23GameTests(unittest.IsolatedAsyncioTestCase):
                "joydance_connection_locks": defaultdict(asyncio.Lock), "config_handler": config}
 
         def factory(**kwargs):
-            result = JustDanceGame2023(**kwargs)
+            result = create_game(**kwargs)
             result.pair = asyncio.Event().wait
             self.addAsyncCleanup(result.disconnect, should_reconnect=False)
             return result
 
         data = dict(controller_serial=game.controller.serial, pairing_method="jd23", pairing_code="abcd1234",
                     host_ip_addr="", console_ip_addr="192.168.1.3")
-        with patch.object(dance, "JustDanceGame2023", new=factory):
+        with patch.object(dance, "create_game", new=factory):
             await dance.connect_controller(app, None, data)
         result = app["joydance_connections"][game.controller.serial]
         self.assertIsInstance(result, JustDanceGame2023)
@@ -569,7 +570,7 @@ class HarbourQuicTests(unittest.IsolatedAsyncioTestCase):
         game.console_endpoint = ("127.0.0.1", server._transport.get_extra_info("sockname")[1])
         pending = [(0.25, -0.5, 1.0)]
         game.controller.get_accel_events.side_effect = lambda: [pending.pop()] if pending else []
-        with patch("joydance.games.justdance_2023.ROOT_CA", cert.public_bytes(Encoding.PEM)):
+        with patch("joydance.games.jd23.game.ROOT_CA", cert.public_bytes(Encoding.PEM)):
             task = asyncio.create_task(game.connect_ws())
             try:
                 self.assertEqual(await asyncio.wait_for(motion, 3), [{"x": 0.25, "y": -0.5, "z": 1.0}])

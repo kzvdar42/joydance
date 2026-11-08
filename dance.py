@@ -27,9 +27,7 @@ from joydance.constants import (
     BASE_CONTROLLER_STATE_INFO,
 )
 from joydance.controllers import update_controllers_list
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
-from joydance.games.justdance_2023 import JustDanceGame2023
+from joydance.games.factory import create_game
 from joydance.games.jdnow import web as jdnow_web
 from joydance.games.jdnow.game import EMPTY_SONG_SEARCH, JustDanceGameNow
 from joydance.games.jdnow.workers import JDNowScoringWorkers
@@ -159,17 +157,7 @@ async def connect_controller(app, ws, data) -> None:
                 console_options["on_guest"] = save_jdnow_guest
                 console_options["scoring_workers"] = scoring_workers
 
-            if pairing_method == PairingMethod.OLD.value:
-                game_class = JustDanceGameV1
-            elif pairing_method == PairingMethod.JD23.value:
-                game_class = JustDanceGame2023
-            elif pairing_method == PairingMethod.JDNOW.value:
-                game_class = JustDanceGameNow
-            else:
-                game_class = JustDanceGameV2
-
-            logger.debug(f"{serial}: connect_controller - creating {game_class.__name__} instance")
-            game_connection = game_class(
+            game_connection = create_game(
                 controller=controller,
                 pairing_code=pairing_code,
                 host_ip_addr=host_ip_addr,
@@ -179,6 +167,7 @@ async def connect_controller(app, ws, data) -> None:
                 pairing_method=pairing_method,
                 **console_options,
             )
+            logger.debug("%s: connect_controller - created %s instance", serial, type(game_connection).__name__)
 
             previous_connection = app["joydance_connections"].get(serial)
             if previous_connection is not None:

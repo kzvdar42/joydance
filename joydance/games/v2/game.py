@@ -16,9 +16,10 @@ from joydance.constants import (
     JD_PING_INTERVAL,
     JD_PING_TIMEOUT,
 )
-from .justdance_abstract import JustDanceGameAbstract
-from .discovery import GAME_PORT, discover_jdmo_game
-from .websocket_connection import JustDanceConnection
+from ..justdance_abstract import JustDanceGameAbstract
+from ..discovery import GAME_PORT
+from ..websocket_connection import JustDanceConnection
+from .jdmo_pairing import discover_jdmo_game
 from joydance.utils.network import is_private_ipv4
 
 

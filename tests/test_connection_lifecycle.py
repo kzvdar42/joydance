@@ -16,8 +16,8 @@ from joydance.controllers.joycon.pycon.constants import (
     JOYCON_VENDOR_ID,
 )
 from joydance.controllers.joycon.pycon.joycon import JoyCon
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v1.game import JustDanceGameV1
+from joydance.games.v2.game import JustDanceGameV2
 from joydance.utils import ControllerConnectionError
 
 
@@ -237,8 +237,8 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         patch.object(
                             game, "send_pairing_code", new=AsyncMock()
                         ) as pairing,
-                        patch("joydance.games.justdance_v1.logger"),
-                        patch("joydance.games.justdance_v2.logger"),
+                        patch("joydance.games.v1.game.logger"),
+                        patch("joydance.games.v2.game.logger"),
                     ):
                         retry = asyncio.create_task(game.attempt_reconnect())
                         game.reconnection_task = retry

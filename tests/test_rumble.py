@@ -13,9 +13,9 @@ from joydance.controllers.joycon.pycon.constants import (
     JOYCON_VENDOR_ID,
     JOYCON_R_PRODUCT_ID,
 )
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
-from joydance.games.justdance_2023 import JustDanceGame2023
+from joydance.games.v1.game import JustDanceGameV1
+from joydance.games.v2.game import JustDanceGameV2
+from joydance.games.jd23.game import JustDanceGame2023
 
 
 PLAY_SOUND = json.dumps({"__class": "JD_PlaySound_ConsoleCommandData", "soundIndex": 40})

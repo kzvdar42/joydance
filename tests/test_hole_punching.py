@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from joydance.constants import PairingState
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v2.game import JustDanceGameV2
 from joydance.utils import GameConnectionError
 
 

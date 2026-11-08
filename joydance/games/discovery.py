@@ -1,20 +1,15 @@
 import asyncio
 import json
-import logging
 import re
 import socket
 from contextlib import aclosing
 from ipaddress import IPv4Address
 from urllib.parse import urlparse
 
-from websockets.asyncio.client import connect
-from websockets.exceptions import WebSocketException
-
 from joydance.constants import WS_SUBPROTOCOLS, WsSubprotocolVersion
 from joydance.utils.network import is_local_ipv4, normalize_console_url
 
 
-logger = logging.getLogger("joydance")
 CONSOLE_PORT = 6000
 PHONE_PORT = 7000
 GAME_PORT = 8080
@@ -47,7 +42,7 @@ def _parse_console(info, address):
     return None
 
 
-async def _discovery_replies(host_ip):
+async def discovery_replies(host_ip):
     # Replies always target port 7000; serialize scans and controller pairing probes.
     async with _discovery_lock:
         loop = asyncio.get_running_loop()
@@ -90,7 +85,7 @@ async def discover_consoles(host_ip):
     except OSError:
         local_addresses = []
     consoles = {}
-    async with aclosing(_discovery_replies(host_ip)) as replies:
+    async with aclosing(discovery_replies(host_ip)) as replies:
         async for info, address in replies:
             console = _parse_console(info, address)
             if not console:
@@ -119,33 +114,3 @@ async def discover_consoles(host_ip):
             ):
                 previous.update(console)
     return list(consoles.values())
-
-
-async def _is_game_endpoint(address):
-    """Check the V2 WebSocket upgrade without sending Hello or joining a player."""
-    protocol = WS_SUBPROTOCOLS[WsSubprotocolVersion.V2.value]
-    try:
-        async with connect(
-            f"ws://{address}:{GAME_PORT}/smartphone", subprotocols=[protocol],
-            open_timeout=1, close_timeout=0.1, ping_interval=None, proxy=None,
-        ) as websocket:
-            return websocket.subprotocol == protocol
-    except (OSError, TimeoutError, WebSocketException):
-        return False
-
-
-async def discover_jdmo_game(pairing_code, host_ip):
-    checked = set()
-    try:
-        async with aclosing(_discovery_replies(host_ip)) as replies:
-            async for info, address in replies:
-                if (info.get("pairingCode") != pairing_code
-                        or info.get("protocol") != WS_SUBPROTOCOLS[WsSubprotocolVersion.V2.value]
-                        or address in checked):
-                    continue
-                checked.add(address)
-                if await _is_game_endpoint(address):
-                    return address
-    except (OSError, TimeoutError) as error:
-        logger.debug("Local JDMO discovery unavailable: %s", error)
-    return None

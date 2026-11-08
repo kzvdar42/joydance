@@ -1,5 +1,5 @@
-from .justdance_abstract import JustDanceGameAbstract
-from .websocket_connection import JustDanceConnection
+from ..justdance_abstract import JustDanceGameAbstract
+from ..websocket_connection import JustDanceConnection
 from collections import defaultdict
 import json
 import logging

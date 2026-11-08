@@ -8,7 +8,7 @@ from websockets.protocol import State
 
 from joydance.constants import Command
 from joydance.controllers.joycon.pycon.constants import JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v2.game import JustDanceGameV2
 from test_button_mapping import BufferedButtons, controller_with_buttons, input_collection, menu_setup
 
 
@@ -43,7 +43,7 @@ class TakeoverHoldTests(unittest.IsolatedAsyncioTestCase):
 
     def poll(self, now):
         commands = {cmd for cmd in Command if self.game.is_command_allowed(cmd)}
-        with patch("joydance.games.justdance_v2.time", SimpleNamespace(monotonic=lambda: now)):
+        with patch("joydance.games.v2.game.time", SimpleNamespace(monotonic=lambda: now)):
             return self.game._get_button_command(commands)
 
     async def test_short_taps_do_not_trigger_and_hold_sends_once_until_release(self):
@@ -197,7 +197,7 @@ class TakeoverHoldTests(unittest.IsolatedAsyncioTestCase):
             state=State.OPEN, send=AsyncMock(side_effect=lambda *args: sent_times.append(now)),
         )
         self.game.is_connected = True
-        with patch("joydance.games.justdance_v2.time", SimpleNamespace(monotonic=lambda: now)):
+        with patch("joydance.games.v2.game.time", SimpleNamespace(monotonic=lambda: now)):
             with self.assertRaises(asyncio.CancelledError):
                 await self.game.send_command()
         self.assertEqual(sent_times, [2.01])

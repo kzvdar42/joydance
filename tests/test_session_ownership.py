@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import dance
 from joydance.config_handler import ConfigHandler
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.factory import create_game
+from joydance.games.v2.game import JustDanceGameV2
 from joydance.utils import GameConnectionError
 from websockets.protocol import State
 
@@ -38,32 +38,35 @@ class SessionOwnershipTests(unittest.IsolatedAsyncioTestCase):
             "pairing_code": "123456",
         }
         self.sessions = []
-        for name, game_class in (("JustDanceGameV1", JustDanceGameV1), ("JustDanceGameV2", JustDanceGameV2)):
-            def create(game_class=game_class, **kwargs):
-                game = game_class(**kwargs)
-                game.pair = asyncio.Event().wait
-                self.sessions.append(game)
-                return game
-            factory = patch.object(dance, name, new=create)
-            factory.start()
-            self.addCleanup(factory.stop)
+
+        def create(**kwargs):
+            game = create_game(**kwargs)
+            game.pair = asyncio.Event().wait
+            self.sessions.append(game)
+            return game
+
+        factory = patch.object(dance, "create_game", new=create)
+        factory.start()
+        self.addCleanup(factory.stop)
         self.addAsyncCleanup(self.stop_all_sessions)
 
     async def stop_all_sessions(self):
         for game in self.sessions:
             await game.disconnect(should_reconnect=False)
 
-    async def test_jdmo_uses_v2_code_pairing_and_does_not_reuse_the_console_address(self):
-        data = {**self.data, "pairing_method": "jdmo"}
-        await dance.connect_controller(self.app, self.ws, data)
-        game = self.app["joydance_connections"]["test"]
-        self.assertIsInstance(game, JustDanceGameV2)
-        self.assertEqual(game.pairing_method, "jdmo")
-        self.assertIsNone(game.console_ip_addr)
-        self.assertEqual(game.host_ip_addr, data["host_ip_addr"])
-        self.assertEqual(game.pairing_code, data["pairing_code"])
-        self.assertEqual(self.app["controllers_info"]["test"]["pairing_code"], data["pairing_code"])
-        self.assertEqual(self.app["config_handler"].data["pairing_method"], "jdmo")
+    async def test_v2_code_pairing_does_not_reuse_the_console_address(self):
+        for method in ("default", "stadia", "jdmo"):
+            with self.subTest(method=method):
+                data = {**self.data, "pairing_method": method}
+                await dance.connect_controller(self.app, self.ws, data)
+                game = self.app["joydance_connections"]["test"]
+                self.assertIsInstance(game, JustDanceGameV2)
+                self.assertEqual(game.pairing_method, method)
+                self.assertIsNone(game.console_ip_addr)
+                self.assertEqual(game.host_ip_addr, data["host_ip_addr"])
+                self.assertEqual(game.pairing_code, data["pairing_code"])
+                self.assertEqual(self.app["controllers_info"]["test"]["pairing_code"], data["pairing_code"])
+                self.assertEqual(self.app["config_handler"].data["pairing_method"], method)
 
     async def test_popup_close_and_disconnect_hide_keyboard_in_all_browsers(self):
         self.controller.get_latest_command = Mock(return_value=None)

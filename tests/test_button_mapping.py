@@ -10,8 +10,8 @@ from joydance.constants import Command
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
 from joydance.controllers.joycon.pycon.constants import JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID
 from joydance.controllers.joycon.pycon.event import ButtonEventJoyCon
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v1.game import JustDanceGameV1
+from joydance.games.v2.game import JustDanceGameV2
 from joydance.games.jdnow.game import JustDanceGameNow
 
 
@@ -894,7 +894,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
                 ))
         for invalid_table in (None, [], "invalid"):
             with self.subTest(available_input=invalid_table):
-                with patch("joydance.games.justdance_v2.logger"):
+                with patch("joydance.games.v2.game.logger"):
                     await self.message(game, "JD_InputCollectionPhoneData", availableInput=invalid_table)
                 self.assertEqual(await game.preprocess_command(Command.RIGHT), (None, None))
 

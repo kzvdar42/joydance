@@ -13,7 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import dance
 from joydance.config_handler import ConfigHandler
 from joydance.constants import WsCommand
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v2.game import JustDanceGameV2
 from joydance.games.jdnow import web as jdnow_web
 from joydance.games.jdnow.game import JustDanceGameNow
 

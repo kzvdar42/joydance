@@ -13,8 +13,8 @@ from joydance.controllers.joycon.pycon.constants import (
     JOYCON_PRO_PRODUCT_ID,
     JOYCON_VENDOR_ID,
 )
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v1.game import JustDanceGameV1
+from joydance.games.v2.game import JustDanceGameV2
 
 
 def motion_report(start):

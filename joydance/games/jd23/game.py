@@ -15,9 +15,9 @@ from aioquic.tls import CipherSuite
 
 from joydance.constants import Command, JD_SERVICE_TIMEOUT, PairingState
 from joydance.utils import GameConnectionError
-from .harbour_connection import HarbourConnection, HarbourProtocol, ROOT_CA
-from .jd23_auth import JD23Pairing
-from .justdance_abstract import JustDanceGameAbstract
+from .connection import HarbourConnection, HarbourProtocol, ROOT_CA
+from .auth import JD23Pairing
+from ..justdance_abstract import JustDanceGameAbstract
 
 
 logger = logging.getLogger(__name__)

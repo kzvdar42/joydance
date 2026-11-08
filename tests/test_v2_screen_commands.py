@@ -7,7 +7,7 @@ from websockets.protocol import State
 
 from joydance.constants import Command
 from joydance.controllers.joycon.pycon.constants import JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v2.game import JustDanceGameV2
 from test_button_mapping import BufferedButtons, controller_with_buttons, input_collection, menu_setup, press
 
 

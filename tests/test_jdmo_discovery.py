@@ -8,6 +8,7 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.asyncio.server import serve
 
 from joydance.games import discovery
+from joydance.games.v2 import jdmo_pairing
 
 
 class ConsoleDiscoveryParsingTests(unittest.TestCase):
@@ -68,7 +69,7 @@ class ConsoleDiscoveryIdentityTests(unittest.IsolatedAsyncioTestCase):
                 yield packet
 
         with (
-            patch.object(discovery, "_discovery_replies", side_effect=replies),
+            patch.object(discovery, "discovery_replies", side_effect=replies),
             patch.object(discovery.socket, "gethostbyname_ex",
                          return_value=("this-pc", [], ["192.168.1.8", "172.19.0.1"]),
                          side_effect=OSError("No address lookup") if lookup_error else None),
@@ -144,7 +145,7 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.game_endpoint = await self.enterAsyncContext(serve(
             game, "127.0.0.1", 0, subprotocols=["v2.phonescoring.jd.ubisoft.com"],
         ))
-        replacement = patch.object(discovery, "GAME_PORT", self.game_endpoint.sockets[0].getsockname()[1])
+        replacement = patch.object(jdmo_pairing, "GAME_PORT", self.game_endpoint.sockets[0].getsockname()[1])
         replacement.start()
         self.addCleanup(replacement.stop)
 
@@ -152,7 +153,7 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             kwargs.update(open_timeout=0.25, close_timeout=0.05)
             return websocket_connect(uri, **kwargs)
 
-        replacement = patch.object(discovery, "connect", side_effect=connect_fast)
+        replacement = patch.object(jdmo_pairing, "connect", side_effect=connect_fast)
         replacement.start()
         self.addCleanup(replacement.stop)
 
@@ -172,7 +173,7 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task, return_exceptions=True)
 
     async def test_only_matching_v2_replies_select_the_actual_sender(self):
-        task = asyncio.create_task(discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        task = asyncio.create_task(jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
         self.addAsyncCleanup(self.cancel, task)
         await self.wait_for_probe()
         for invalid in (b"not json", [], self.reply(code="654321"), self.reply(protocol="v1.phonescoring.jd.ubisoft.com")):
@@ -184,7 +185,7 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.game_messages, [])
 
     async def test_discovery_timeout_returns_no_match(self):
-        self.assertIsNone(await discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        self.assertIsNone(await jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
 
     async def test_scan_collects_both_protocols_and_deduplicates_relay_replies(self):
         task = asyncio.create_task(discovery.discover_consoles("127.0.0.1"))
@@ -234,7 +235,7 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         scan = asyncio.create_task(discovery.discover_consoles("127.0.0.1"))
         self.addAsyncCleanup(self.cancel, scan)
         await self.wait_for_probe()
-        pair = asyncio.create_task(discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        pair = asyncio.create_task(jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
         self.addAsyncCleanup(self.cancel, pair)
 
         async def respond():
@@ -248,7 +249,7 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await asyncio.wait_for(pair, 1), "127.0.0.1")
 
     async def test_phone_relay_is_skipped_before_selecting_the_game(self):
-        task = asyncio.create_task(discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        task = asyncio.create_task(jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
         self.addAsyncCleanup(self.cancel, task)
         await self.wait_for_probe()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as relay:
@@ -269,8 +270,8 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             connections.append(websocket)
             await websocket.wait_closed()
 
-        async with serve(unrelated, "127.0.0.2", discovery.GAME_PORT):
-            task = asyncio.create_task(discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        async with serve(unrelated, "127.0.0.2", jdmo_pairing.GAME_PORT):
+            task = asyncio.create_task(jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
             self.addAsyncCleanup(self.cancel, task)
             await self.wait_for_probe()
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as relay:
@@ -296,8 +297,8 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 writer.close()
                 await writer.wait_closed()
 
-        async with await asyncio.start_server(stalled, "127.0.0.2", discovery.GAME_PORT):
-            task = asyncio.create_task(discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        async with await asyncio.start_server(stalled, "127.0.0.2", jdmo_pairing.GAME_PORT):
+            task = asyncio.create_task(jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
             self.addAsyncCleanup(self.cancel, task)
             await self.wait_for_probe()
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as relay:
@@ -313,10 +314,10 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_busy_phone_port_returns_no_match(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as busy:
             busy.bind(("0.0.0.0", self.phone_port))
-            self.assertIsNone(await discovery.discover_jdmo_game("123456", "127.0.0.1"))
+            self.assertIsNone(await jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
 
     async def test_cancellation_releases_the_phone_port(self):
-        task = asyncio.create_task(discovery.discover_jdmo_game("123456", "127.0.0.1"))
+        task = asyncio.create_task(jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"))
         self.addAsyncCleanup(self.cancel, task)
         await self.wait_for_probe()
         task.cancel()
@@ -334,8 +335,8 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         responder = asyncio.create_task(respond())
         self.addAsyncCleanup(self.cancel, responder)
         results = await asyncio.wait_for(asyncio.gather(
-            discovery.discover_jdmo_game("123456", "127.0.0.1"),
-            discovery.discover_jdmo_game("123456", "127.0.0.1"),
+            jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"),
+            jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"),
         ), 1)
         self.assertEqual(results, ["127.0.0.1", "127.0.0.1"])
         await responder

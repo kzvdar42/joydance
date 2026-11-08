@@ -12,17 +12,17 @@ from websockets.frames import Close, Frame, Opcode
 from websockets.protocol import State
 
 from joydance.constants import JD_PING_INTERVAL, JD_PING_TIMEOUT, JD_SERVICE_TIMEOUT, JDMO_PAIRING_URL, PairingMethod, PairingState
-from joydance.games.justdance_v1 import JustDanceGameV1
-from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.v1.game import JustDanceGameV1
+from joydance.games.v2.game import JustDanceGameV2
 from joydance.utils import GameConnectionError
 
 
 class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        discovery = patch("joydance.games.justdance_v2.discover_jdmo_game", new=AsyncMock(return_value=None))
+        discovery = patch("joydance.games.v2.game.discover_jdmo_game", new=AsyncMock(return_value=None))
         discovery.start()
         self.addCleanup(discovery.stop)
-        for module in ("justdance_abstract", "justdance_v1", "justdance_v2"):
+        for module in ("justdance_abstract", "v1.game", "v2.game"):
             factory = patch("joydance.games." + module + ".logger")
             factory.start()
             self.addCleanup(factory.stop)
@@ -89,8 +89,8 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         game.requires_punch_pairing = True
         game.tls_certificate = "old certificate"
         with (
-            patch("joydance.games.justdance_v2.discover_jdmo_game", new=AsyncMock(return_value="127.0.0.1")) as discover,
-            patch.object(game, "_request_jdmo_pairing", new=AsyncMock()) as request,
+            patch("joydance.games.v2.game.discover_jdmo_game", new=AsyncMock(return_value="127.0.0.1")) as discover,
+            patch("joydance.games.v2.jdmo_pairing.request_pairing", new_callable=AsyncMock) as request,
         ):
             await game.send_pairing_code()
         discover.assert_awaited_once_with("123456", "127.0.0.1")
@@ -117,7 +117,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_official_pairing_does_not_use_jdmo_discovery(self):
         game = self.make_game(JustDanceGameV2)
         with (
-            patch("joydance.games.justdance_v2.discover_jdmo_game", new=AsyncMock()) as discover,
+            patch("joydance.games.v2.game.discover_jdmo_game", new=AsyncMock()) as discover,
             patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(
                 json_body={"pairingUrl": "https://127.0.0.1:8080"},
             )),
@@ -132,7 +132,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                 game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
                 session = self.http_session(body=json.dumps({"pairingUrl": "http://127.0.0.1:8080"}))
                 method = game.send_initiate_punch_pairing if punch else game.send_pairing_code
-                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session) as factory:
+                with patch("joydance.games.v2.jdmo_pairing.aiohttp.ClientSession", return_value=session) as factory:
                     await method()
                 args, kwargs = session.request.call_args
                 path = "initiate-punch-pairing" if punch else "pairing-info"
@@ -162,7 +162,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                         self.http_session(body='{"pairingUrl":"https://127.0.0.1:8080"}').get.return_value,
                     ]
                     method = game.send_initiate_punch_pairing if punch else game.send_pairing_code
-                    with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+                    with patch("joydance.games.v2.jdmo_pairing.aiohttp.ClientSession", return_value=session):
                         if fallback:
                             await method()
                         else:
@@ -181,7 +181,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
             game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
             session = self.http_session()
             session.request.side_effect = TimeoutError()
-            with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=session):
+            with patch("joydance.games.v2.jdmo_pairing.aiohttp.ClientSession", return_value=session):
                 with self.assertRaises(GameConnectionError) as caught:
                     await (game.send_initiate_punch_pairing() if punch else game.send_pairing_code())
             self.assertTrue(caught.exception.should_reconnect)
@@ -210,7 +210,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         ))):
             with self.subTest(response=response):
                 game = self.make_game(JustDanceGameV2, pairing_method=PairingMethod.JDMO.value)
-                with patch("joydance.games.justdance_abstract.aiohttp.ClientSession", return_value=self.http_session(body=json.dumps(response))):
+                with patch("joydance.games.v2.jdmo_pairing.aiohttp.ClientSession", return_value=self.http_session(body=json.dumps(response))):
                     with self.assertRaisesRegex(GameConnectionError, "Invalid console address"):
                         await game.send_pairing_code()
 
@@ -237,7 +237,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
             manager = MagicMock()
             manager.__aenter__.return_value = self.socket()
             with (
-                patch("joydance.games.justdance_v2.connect", return_value=manager) as connect,
+                patch("joydance.games.v2.game.connect", return_value=manager) as connect,
                 patch.object(game, "run_connection_tasks", new=AsyncMock()),
             ):
                 await game.connect_ws()
@@ -300,7 +300,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
                 manager = MagicMock()
                 manager.__aenter__.return_value = self.socket()
                 with (
-                    patch("joydance.games.justdance_v2.connect", return_value=manager) as connect,
+                    patch("joydance.games.v2.game.connect", return_value=manager) as connect,
                     patch.object(game, "run_connection_tasks", new=AsyncMock()),
                 ):
                     await game.connect_ws()
@@ -312,7 +312,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         manager = MagicMock()
         manager.__aenter__.return_value = self.socket()
         with (
-            patch("joydance.games.justdance_v2.connect", return_value=manager) as connect,
+            patch("joydance.games.v2.game.connect", return_value=manager) as connect,
             patch.object(game, "run_connection_tasks", new=AsyncMock()),
         ):
             await game.connect_ws()
@@ -322,7 +322,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         game = self.make_game(JustDanceGameV2)
         game.pairing_url = "wss://[broken"
         with (
-            patch("joydance.games.justdance_v2.connect") as connect,
+            patch("joydance.games.v2.game.connect") as connect,
             patch.object(game, "_handle_connection_error", new=AsyncMock()) as handle_error,
         ):
             await game.connect_ws()
@@ -443,7 +443,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
         manager.__aexit__.return_value = False
         game.pairing_url = "ws://127.0.0.1:8080/smartphone"
         game.pair = game.connect_ws
-        with patch("joydance.games.justdance_v1.connect", return_value=manager):
+        with patch("joydance.games.v1.game.connect", return_value=manager):
             task = await game.start_pair()
             try:
                 await asyncio.wait_for(asyncio.shield(task), 1)
@@ -629,7 +629,7 @@ class GameConnectionTests(unittest.IsolatedAsyncioTestCase):
 
         async with serve(server, "127.0.0.1", 0, subprotocols=["v1.phonescoring.jd.ubisoft.com"], close_timeout=0.05) as listener:
             game.pairing_url = f"ws://127.0.0.1:{listener.sockets[0].getsockname()[1]}/smartphone"
-            with patch("joydance.games.justdance_v1.connect", side_effect=connect_fast):
+            with patch("joydance.games.v1.game.connect", side_effect=connect_fast):
                 task = asyncio.create_task(game.connect_ws())
                 try:
                     await asyncio.wait_for(ready.wait(), 1)

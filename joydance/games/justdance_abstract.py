@@ -1,4 +1,5 @@
 from .abstract_game_wrapper import AbstractGameWrapper
+from .v2 import jdmo_pairing
 import asyncio
 import aiohttp
 import json
@@ -16,7 +17,6 @@ from joydance.constants import (
     FRAME_DURATION,
     UBI_APP_ID,
     UBI_SKU_ID,
-    JDMO_PAIRING_URL,
     PairingMethod,
     PairingState,
     Command,
@@ -185,7 +185,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
 
     async def send_pairing_code(self):
         if self.pairing_method == PairingMethod.JDMO.value:
-            json_body = await self._request_jdmo_pairing("pairing-info")
+            json_body = await jdmo_pairing.request_pairing("pairing-info", headers=self.headers, pairing_code=self.pairing_code)
         else:
             url = "https://prod.just-dance.com/sessions/v1/pairing-info"
             async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
@@ -214,36 +214,6 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         self.tls_certificate = json_body.get("tlsCertificate")
         self.requires_punch_pairing = json_body.get("requiresPunchPairing", False) in (True, 1, "1", "true")
 
-    async def _request_jdmo_pairing(self, path, payload=None):
-        is_punch = payload is not None
-        state = PairingState.ERROR_PUNCH_PAIRING if is_punch else PairingState.ERROR_CONNECTION
-        try:
-            async with aiohttp.ClientSession(headers=self.headers, timeout=aiohttp.ClientTimeout(total=JD_SERVICE_TIMEOUT)) as session:
-                for version in (1, 2):
-                    url = f"{JDMO_PAIRING_URL}/v{version}/{path}"
-                    async with session.request(
-                        "POST" if is_punch else "GET", url,
-                        params=None if is_punch else {"code": self.pairing_code}, json=payload,
-                    ) as resp:
-                        body = await resp.text()
-                        try:
-                            data = json.loads(body)
-                        except ValueError:
-                            data = body
-                        # The JDMO app retries v2 only when v1 has no route, not for invalid-code JSON errors.
-                        if version == 1 and resp.status in {404, 405} and (data is None or isinstance(data, str)):
-                            continue
-                        if not 200 <= resp.status < 300:
-                            invalid_code = not is_punch and resp.status in {400, 404, 410}
-                            raise GameConnectionError(
-                                "Invalid or expired pairing code." if invalid_code else f"JDMO pairing service rejected the request (HTTP {resp.status}).",
-                                PairingState.ERROR_INVALID_PAIRING_CODE if invalid_code else state,
-                                should_reconnect=resp.status >= 500 or resp.status in {408, 429},
-                            )
-                        return data
-        except (aiohttp.ClientError, TimeoutError) as error:
-            raise GameConnectionError(f"JDMO pairing request failed: {str(error) or 'request timed out'}.", state) from error
-
     async def send_initiate_punch_pairing(self):
         url = "https://prod.just-dance.com/sessions/v1/initiate-punch-pairing"
         json_payload = {
@@ -253,7 +223,9 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
         }
 
         if self.pairing_method == PairingMethod.JDMO.value:
-            await self._request_jdmo_pairing("initiate-punch-pairing", json_payload)
+            await jdmo_pairing.request_pairing(
+                "initiate-punch-pairing", headers=self.headers, pairing_code=self.pairing_code, payload=json_payload,
+            )
             return
 
         try:

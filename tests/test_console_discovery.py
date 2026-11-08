@@ -9,7 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 import dance
 from joydance.config_handler import ConfigHandler
-from joydance.games.justdance_v1 import JustDanceGameV1
+from joydance.games.v1.game import JustDanceGameV1
 
 
 class ConsoleDiscoveryBrowserTests(unittest.IsolatedAsyncioTestCase):
