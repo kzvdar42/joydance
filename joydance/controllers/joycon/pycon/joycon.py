@@ -17,7 +17,6 @@ from joydance.utils.errors import ControllerConnectionError
 logger = logging.getLogger(__name__)
 
 
-# TODO: disconnect, power off sequence
 class JoyCon:
     _INPUT_REPORT_SIZE = 49
     _COMMAND_OUTPUT_REPORT_SIZE = 0x31
@@ -44,7 +43,8 @@ class JoyCon:
         self.vendor_id = vendor_id
         self.product_id = product_id
         self.serial = serial
-        self.simple_mode = simple_mode  # TODO: It's for reporting mode 0x3f
+        # Keep the flag for caller compatibility. JoyDance always requests full 0x30 reports.
+        self.simple_mode = simple_mode
 
         self._rumble_enabled = True
         self._first_connection_timeout = 1
@@ -511,6 +511,7 @@ class JoyCon:
     def disconnect_device(self):
         """Safely disconnect the device"""
         try:
+            # Request controller sleep before closing the HID handle.
             self._write_output_report(b'\x01', b'\x06', b'\x00')
         finally:
             self.close()
@@ -683,7 +684,7 @@ class JoyCon:
         timeout=None,
         response_validator=None,
     ) -> Tuple[bool, bytes]:
-        # TODO: handle subcmd when daemon is running
+        # Setup owns HID reads while the background input reader is paused.
         if timeout is None:
             timeout = self._subcommand_response_timeout
 
@@ -695,7 +696,7 @@ class JoyCon:
         empty_reports = 0
         seen_report_ids = {}
         seen_subcmd_replies = {}
-        while True:  # TODO, avoid this, await daemon instead
+        while True:
             self._ensure_active_connection_is_not_stopped()
             report = self._read_input_report()
             num_attempts += 1
@@ -713,6 +714,7 @@ class JoyCon:
             elif report[0] != 0x21:
                 seen_report_ids[report[0]] = seen_report_ids.get(report[0], 0) + 1
             else:
+                # The subcommand acknowledgement follows the 13-byte input header.
                 response = report[13:]
                 if len(response) < 2 or response[1:2] != subcommand:
                     if len(response) >= 2:
@@ -726,7 +728,6 @@ class JoyCon:
                         response.hex(),
                     )
                 else:
-                    # TODO: determine if the cut bytes are worth anything
                     return response[0] & 0x80, response  # (ack, data)
 
             if now >= next_resend:
