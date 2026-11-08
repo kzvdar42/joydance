@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 import json
 import unittest
 from types import SimpleNamespace
@@ -744,7 +745,7 @@ class BufferedButtons:
     joycon_button_event = ButtonEventJoyCon.joycon_button_event
 
     def __init__(self):
-        self._events_buffer = []
+        self._events_buffer = deque()
 
 
 class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
@@ -965,7 +966,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
         await game.on_message(json.dumps(input_collection({
             "VALID": {"__class": "JD_Input_PhoneCommandData", "input": 185785632},
         })))
-        self.assertEqual(game.controller.joycon._events_buffer, [])
+        self.assertFalse(game.controller.joycon._events_buffer)
 
     async def test_v2_button_press_sends_the_supplied_command_on_the_socket(self):
         game = self.make_game(JustDanceGameV2)
@@ -1284,7 +1285,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
                     game.controller.product_id = product_id
                     game.controller.joycon.joycon_button_event(button, 1)
                     await self.message(game, "JD_OpenPhoneKeyboard_ConsoleCommandData")
-                    self.assertEqual(game.controller.joycon._events_buffer, [])
+                    self.assertFalse(game.controller.joycon._events_buffer)
                     await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=False)
                     await self.message(game, "ShortcutSetup_ConsoleCommandData", isEnabled=False)
                     if game_class is JustDanceGameV2:
@@ -1332,7 +1333,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
                 game = self.make_game(game_class)
                 game.controller.joycon.joycon_button_event("a", 1)
                 await game.on_message(json.dumps(menu_setup()))
-                self.assertEqual(game.controller.joycon._events_buffer, [])
+                self.assertFalse(game.controller.joycon._events_buffer)
                 await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=False)
                 game.is_connected = True
                 game.send_message = AsyncMock()
@@ -1340,7 +1341,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     game.controller.joycon.joycon_button_event("a", 1)
                     await asyncio.sleep(0.06)
-                    self.assertEqual(game.controller.joycon._events_buffer, [])
+                    self.assertFalse(game.controller.joycon._events_buffer)
                     # Also discard a press arriving between the last poll and the enable message.
                     game.controller.joycon.joycon_button_event("a", 1)
                     await self.message(game, "InputSetup_ConsoleCommandData", isEnabled=True)
@@ -1393,7 +1394,7 @@ class InputPermissionTests(unittest.IsolatedAsyncioTestCase):
                         (0.15, None, None),
                     ])
                     self.assertEqual(sent_times, [0, 0.05, 0.1])
-                    self.assertEqual(game.controller.joycon._events_buffer, [])
+                    self.assertFalse(game.controller.joycon._events_buffer)
 
     async def test_button_presses_do_not_wait_for_or_extend_joystick_repeat_delay(self):
         for game_class in (JustDanceGameV1, JustDanceGameV2):

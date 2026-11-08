@@ -1,3 +1,5 @@
+from collections import deque
+
 from .wrappers import PythonicJoyCon
 
 
@@ -5,7 +7,7 @@ class ButtonEventJoyCon(PythonicJoyCon):
     def __init__(self, *args, track_sticks=False, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._events_buffer = []  # TODO: perhaps use a deque instead?
+        self._events_buffer = deque()
 
         self._event_handlers = {}
         self._event_track_sticks = track_sticks
@@ -34,7 +36,7 @@ class ButtonEventJoyCon(PythonicJoyCon):
 
     def events(self):
         while self._events_buffer:
-            yield self._events_buffer.pop(0)
+            yield self._events_buffer.popleft()
 
     @staticmethod
     def _event_tracking_update_hook_right(self):

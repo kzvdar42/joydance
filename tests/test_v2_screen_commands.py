@@ -179,7 +179,7 @@ class V2ScreenCommandTests(unittest.IsolatedAsyncioTestCase):
         }]}
         self.game._on_game_message.reset_mock()
         await self.game.on_message(json.dumps(update))
-        self.assertEqual(self.game.controller.joycon._events_buffer, [])
+        self.assertFalse(self.game.controller.joycon._events_buffer)
         self.assertEqual(self.game.controller.available_shortcuts, {Command.UPLOAD})
         self.game._on_game_message.assert_awaited_once_with(update)
 
