@@ -328,15 +328,16 @@ class JdmoDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_two_controllers_can_discover_without_competing_for_the_port(self):
         async def respond():
-            for _ in range(2):
+            while True:
                 await self.wait_for_probe()
                 await self.send(self.reply())
 
         responder = asyncio.create_task(respond())
-        self.addAsyncCleanup(self.cancel, responder)
-        results = await asyncio.wait_for(asyncio.gather(
-            jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"),
-            jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"),
-        ), 1)
+        try:
+            results = await asyncio.wait_for(asyncio.gather(
+                jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"),
+                jdmo_pairing.discover_jdmo_game("123456", "127.0.0.1"),
+            ), 1)
+        finally:
+            await self.cancel(responder)
         self.assertEqual(results, ["127.0.0.1", "127.0.0.1"])
-        await responder
