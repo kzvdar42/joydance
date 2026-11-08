@@ -34,8 +34,13 @@ class App extends Component {
 
         window.mitty.on('req_' + WsCommand.GET_CONTROLLER_LIST, this.requestGetControllerList)
         window.mitty.on('req_' + WsCommand.CONNECT_CONTROLLER, this.requestConnectController)
+        window.mitty.on('resp_' + WsCommand.CONNECT_CONTROLLER, data => {
+            if (data.error) alert(data.error)
+        })
         window.mitty.on('req_' + WsCommand.DISCONNECT_CONTROLLER, this.requestDisconnectController)
         window.mitty.on('req_' + WsCommand.SEARCH_INPUT, this.handleSearchInput)
+        window.mitty.on('req_' + WsCommand.SELECT_SONG, data => this.sendRequest(WsCommand.SELECT_SONG, data))
+        window.mitty.on('req_' + WsCommand.RENAME_PLAYER, data => this.sendRequest(WsCommand.RENAME_PLAYER, data))
         window.mitty.on('req_' + WsCommand.TOGGLE_RUMBLE, this.handleToggleRumble)
     }
 
@@ -49,7 +54,7 @@ class App extends Component {
             cmd: cmd,
             data: data
         };
-        console.log('Sending WebSocket message:', cmd === WsCommand.SEARCH_INPUT ? {cmd} : msg);
+        console.log('Sending WebSocket message:', [WsCommand.SEARCH_INPUT, WsCommand.RENAME_PLAYER].includes(cmd) ? {cmd} : msg);
         this.socket.send(JSON.stringify(msg));
         return true;
     }
@@ -68,7 +73,8 @@ class App extends Component {
         this.sendRequest(WsCommand.TOGGLE_RUMBLE, data);
     }
 
-    requestConnectController(serial) {
+    requestConnectController(controller) {
+        const {serial, guest} = typeof controller === 'string' ? {serial: controller} : controller
         const state = this.state.connection
         if (!state) {
             alert('Select a connection or add a new one first.')
@@ -76,7 +82,7 @@ class App extends Component {
         }
         const pairing_method = state.pairing_method
         const addr = usesHostAddress(pairing_method) ? state.host_ip_addr : state.console_ip_addr
-        if (pairing_method !== PairingMethod.JD23 && !isValidIPv4(addr)) {
+        if (![PairingMethod.JD23, PairingMethod.JDNOW].includes(pairing_method) && !isValidIPv4(addr)) {
             alert('ERROR: Invalid IP address!')
             return
         }
@@ -95,6 +101,7 @@ class App extends Component {
             console_ip_addr: state.console_ip_addr,
             pairing_code: state.pairing_code,
             controller_serial: serial,
+            ...(pairing_method === PairingMethod.JDNOW && guest !== undefined ? {jdnow_guest: guest} : {}),
             ...(state.console_url ? {console_url: state.console_url} : {}),
         })
     }
@@ -128,9 +135,9 @@ class App extends Component {
         socket.onmessage = (event) => {
             if (this.socket !== socket) return;
             const msg = JSON.parse(event.data)
-            console.log('Received WebSocket message:', msg)
             const cmd = msg['cmd']
             const shortCmd = msg['cmd'].slice(5)  // Remove "resp_" prefix
+            console.log('Received WebSocket message:', shortCmd === WsCommand.RENAME_PLAYER ? {cmd} : msg)
 
             switch (shortCmd) {
                 case WsCommand.GET_CONTROLLER_LIST:
@@ -228,6 +235,7 @@ class App extends Component {
                 <div class="pure-u-1 controllers">
                     <${Controllers} 
                         controllers=${state.controllers}
+                        jdnow=${state.connection?.pairing_method === PairingMethod.JDNOW}
                     />
                 </div>
             </div>

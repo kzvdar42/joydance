@@ -6,6 +6,7 @@ import sys
 import ipaddress
 import json
 import tempfile
+from hashlib import sha256
 from uuid import uuid4
 from urllib.parse import urlparse
 
@@ -14,6 +15,8 @@ from .utils.network import is_private_ipv4, normalize_console_url
 
 
 REGEX_PAIRING_CODE = re.compile(r"^\d{6}$")
+JDNOW_PLAYER_ID = re.compile(r"[A-Za-z0-9_-]{16,128}")
+JDNOW_LINKED_OWNER = "@ubisoft"
 
 
 class ConfigHandler:
@@ -98,6 +101,97 @@ class ConfigHandler:
             self._connections = previous
             raise OSError("Could not delete the connection. Check access to the configuration file.")
 
+    def _read_jdnow_players(self):
+        players = json.loads(self._parser.get("jdnow", "players", fallback="{}"))
+        if not isinstance(players, dict):
+            raise ValueError("Invalid saved Just Dance Now profiles.")
+        return players
+
+    @staticmethod
+    def _jdnow_player_record(players, serial):
+        record = players.get(serial)
+        if record is None:
+            return {"active": None, "guests": {}}
+        if isinstance(record, str):
+            record = {"active": record, "guests": {record: ""}}
+        if (not isinstance(record, dict) or not isinstance(record.get("guests"), dict)
+                or not isinstance(record.get("active"), str) or record["active"] not in record["guests"]
+                or any(not JDNOW_PLAYER_ID.fullmatch(player_id) or not isinstance(name, str)
+                       for player_id, name in record["guests"].items())):
+            raise ValueError("Invalid saved Just Dance Now profile.")
+        return record
+
+    def get_jdnow_player_id(self, serial, guest=None):
+        players = self._read_jdnow_players()
+        if guest is None:
+            return self._jdnow_player_record(players, serial)["active"]
+        if guest == "new":
+            return None
+        for player_id, profile in self._jdnow_guest_pool(players).items():
+            if profile["key"] == guest:
+                return player_id
+        raise ValueError("This Just Dance Now guest is no longer available.")
+
+    def _jdnow_guest_pool(self, players):
+        guests = {}
+        linked = self._jdnow_player_record(players, JDNOW_LINKED_OWNER)["guests"]
+        for serial in players:
+            for player_id, name in self._jdnow_player_record(players, serial)["guests"].items():
+                if player_id not in guests:
+                    # A stable picker key survives filtering and keeps the private ID on the server.
+                    guests[player_id] = {"key": sha256(player_id.encode("ascii")).hexdigest(),
+                                         "name": name, "controllers": []}
+                profile = guests[player_id]
+                profile["name"] = profile["name"] or name
+                if serial != JDNOW_LINKED_OWNER:
+                    profile["controllers"].append(serial)
+        for index, (player_id, profile) in enumerate(guests.items(), 1):
+            label = f"Ubisoft profile {index}" if player_id in linked else f"Guest {index}"
+            profile["name"] = f"{label} · {profile['name']}" if profile["name"] else label
+        return guests
+
+    def get_jdnow_guest_states(self, serials, in_use):
+        players = self._read_jdnow_players()
+        guests = {player_id: profile for player_id, profile in self._jdnow_guest_pool(players).items()
+                  if player_id not in in_use}
+        options = list(guests.values())
+        return {serial: {"jdnow_guests": options,
+                         "jdnow_guest": guests.get(self._jdnow_player_record(players, serial)["active"], {}).get("key")}
+                for serial in serials}
+
+    def save_jdnow_linked_profile(self, player_id, name):
+        self.save_jdnow_player_id(JDNOW_LINKED_OWNER, player_id, name)
+
+    def save_jdnow_player_id(self, serial, player_id, name=None):
+        if not isinstance(player_id, str) or not JDNOW_PLAYER_ID.fullmatch(player_id):
+            raise ValueError("Invalid Just Dance Now profile.")
+        players = self._read_jdnow_players()
+        record = self._jdnow_player_record(players, serial)
+        guests = record["guests"].copy()
+        guests[player_id] = name if isinstance(name, str) and name else guests.get(player_id, "")
+        updated = {"active": player_id, "guests": guests}
+        changed = players.get(serial) != updated
+        players[serial] = updated
+        if isinstance(name, str) and name:
+            for owner in players:
+                if owner == serial:
+                    continue
+                other = self._jdnow_player_record(players, owner)
+                if player_id in other["guests"] and other["guests"][player_id] != name:
+                    other["guests"][player_id] = name
+                    players[owner] = other
+                    changed = True
+        if not changed:
+            return
+        previous = dict(self._parser["jdnow"]) if "jdnow" in self._parser else None
+        self._parser["jdnow"] = {**(previous or {}), "players": json.dumps(players)}
+        if not self.save_data():
+            if previous is None:
+                self._parser.remove_section("jdnow")
+            else:
+                self._parser["jdnow"] = previous
+            raise OSError("Could not save the Just Dance Now guest profile.")
+
     @property
     def data(self):
         return self._data
@@ -131,6 +225,9 @@ class ConfigHandler:
 
         if method == PairingMethod.JD23.value and not is_valid_pairing_code(new_config.get("pairing_code", ""), method):
             return False, "Invalid JD23+ pairing code (must be 8 letters or digits)."
+
+        if method == PairingMethod.JDNOW.value and not is_valid_pairing_code(new_config.get("pairing_code", ""), method):
+            return False, "Invalid Just Dance Now Dance Room number (must be 4 to 9 digits)."
 
         return True, ""
 
@@ -236,6 +333,8 @@ def is_valid_pairing_code(val: str, method=None) -> bool:
         return False
     if method == PairingMethod.JD23.value:
         return re.fullmatch(r"[a-zA-Z0-9]{8}", val) is not None
+    if method == PairingMethod.JDNOW.value:
+        return re.fullmatch(r"[0-9]{4,9}", val) is not None
     return re.fullmatch(REGEX_PAIRING_CODE, val) is not None
 
 
@@ -259,6 +358,7 @@ def is_valid_pairing_method(val: str) -> bool:
         PairingMethod.OLD.value,
         PairingMethod.JDMO.value,
         PairingMethod.JD23.value,
+        PairingMethod.JDNOW.value,
     }
 
 

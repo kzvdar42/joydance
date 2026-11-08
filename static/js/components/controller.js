@@ -52,16 +52,25 @@ class Controller extends Component {
 
         this.connect = this.connect.bind(this)
         this.disconnect = this.disconnect.bind(this)
+        this.signIn = this.signIn.bind(this)
         this.onStateUpdated = this.onStateUpdated.bind(this)
+        this.onPlayerRenamed = this.onPlayerRenamed.bind(this)
         this.toggleRumble = this.toggleRumble.bind(this)
 
         this.state = {
             controller: props.controller,
+            guestChoice: null,
+            playerName: null,
+            songQuery: '',
+            showSongResults: false,
+            signingIn: false,
+            signInFeedback: null,
         }
     }
 
     componentDidMount() {
         window.mitty.on('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
+        window.mitty.on('resp_' + WsCommand.RENAME_PLAYER, this.onPlayerRenamed)
     }
 
     componentDidUpdate(prevProps) {
@@ -72,14 +81,41 @@ class Controller extends Component {
 
     componentWillUnmount() {
         window.mitty.off('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
+        window.mitty.off('resp_' + WsCommand.RENAME_PLAYER, this.onPlayerRenamed)
+    }
+
+    selectedGuest() {
+        const { controller, guestChoice } = this.state
+        if (guestChoice === 'new' || controller.jdnow_guests?.some(guest => guest.key === guestChoice)) {
+            return guestChoice
+        }
+        return controller.jdnow_guest ?? 'new'
     }
 
     connect() {
-        window.mitty.emit('req_' + WsCommand.CONNECT_CONTROLLER, this.props.controller.serial)
+        const serial = this.props.controller.serial
+        window.mitty.emit('req_' + WsCommand.CONNECT_CONTROLLER,
+            this.props.jdnow ? {serial, guest: this.selectedGuest()} : serial)
+        this.setState({guestChoice: null, playerName: null, showSongResults: false})
     }
 
     disconnect() {
         window.mitty.emit('req_' + WsCommand.DISCONNECT_CONTROLLER, this.props.controller.serial)
+    }
+
+    async signIn() {
+        this.setState({signingIn: true, signInFeedback: null})
+        try {
+            const response = await fetch('/jdnow/sign-in', {method: 'POST'})
+            const data = await response.json()
+            this.setState({signInFeedback: response.ok
+                ? {text: 'Profile imported. Choose it from the picker.'}
+                : {text: data.error, error: true}})
+        } catch {
+            this.setState({signInFeedback: {text: 'Could not complete Ubisoft sign-in.', error: true}})
+        } finally {
+            this.setState({signingIn: false})
+        }
     }
 
     toggleRumble() {
@@ -103,13 +139,32 @@ class Controller extends Component {
         }
     }
 
-    render(props, { controller }) {
+    onPlayerRenamed({serial, submitted_name}) {
+        if (serial === this.props.controller.serial) {
+            this.setState(({playerName}) => playerName === submitted_name ? {playerName: null} : null)
+        }
+    }
+
+    render(props, { controller, playerName, songQuery, showSongResults, signingIn, signInFeedback }) {
         const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message, is_main_player, error_details } = controller
         const controllerState = state
         const stateMessage = controllerState >= PairingState.ERROR_CONTROLLER && error_details
             ? error_details : PairingStateMessage[controllerState]
 
         const batteryLevel = BATTERY_LEVEL[battery_level]
+        const songs = showSongResults ? controller.song_search_results || [] : []
+        const total = showSongResults ? controller.song_search_total : null
+        const searchFeedback = showSongResults && controller.song_search_feedback
+        const renameFeedback = controller.player_rename_feedback
+        const canRename = controllerState == PairingState.CONNECTED && controller.supports_player_rename
+        let searchStatus = ''
+        if (total === 0) {
+            searchStatus = 'No songs match. Try another title or artist.'
+        } else if (total > songs.length) {
+            searchStatus = `Showing ${songs.length} of ${total} songs`
+        } else if (total > 0) {
+            searchStatus = `${total} ${total === 1 ? 'song' : 'songs'} found`
+        }
 
         return html`
             <li>
@@ -129,7 +184,7 @@ class Controller extends Component {
                                 `}
                                 <span>P${player_id}: ${player_name}</span>
                                 ${controllerState == PairingState.CONNECTED && is_main_player && html`<span class="player-role">Main</span>`}
-                                ${additional_message && html`<span>${additional_message}</span>`}
+                                ${additional_message && html`<span class="controller-message">${additional_message}</span>`}
                             </div>
                         `}
                     </div>
@@ -151,10 +206,116 @@ class Controller extends Component {
                             <button type="button" onClick=${this.disconnect} class="pure-button pure-button-error">Stop</button>
                         `}
                         ${!connection_requested && controllerState != PairingState.CONNECTED && html`
-                            <button type="button" onClick=${this.connect} class="pure-button pure-button-primary">Connect</button>
+                            <button type="button" onClick=${this.connect} disabled=${signingIn} class="pure-button pure-button-primary">Connect</button>
                         `}
                     </div>
                 </div>
+                ${props.jdnow && !connection_requested && controllerState !== PairingState.CONNECTED && html`
+                    <div class="pure-form controller-tools">
+                        <label>JDNow guest
+                            <select value=${this.selectedGuest()} onChange=${event => this.setState({guestChoice: event.target.value})}>
+                                ${(controller.jdnow_guests || []).map(guest => {
+                                    const others = guest.controllers.filter(serial => serial !== controller.serial)
+                                    const label = others.length ? `${guest.name} · Saved for ${others.join(', ')}` : guest.name
+                                    return html`<option value=${guest.key}>${label}</option>`
+                                })}
+                                <option value="new">New guest</option>
+                            </select>
+                        </label>
+                        ${['localhost', '127.0.0.1'].includes(window.location.hostname) && html`
+                            <button type="button" class="pure-button" disabled=${signingIn} onClick=${this.signIn}>
+                                Sign in with Ubisoft
+                            </button>
+                        `}
+                    </div>
+                    ${signingIn && html`<p class="controller-field-status" role="status">Finish signing in in the Ubisoft window.</p>`}
+                    ${signInFeedback && html`
+                        <p class="controller-field-status" role=${signInFeedback.error ? 'alert' : 'status'}>${signInFeedback.text}</p>
+                    `}
+                `}
+                ${(canRename || renameFeedback?.error) && html`
+                    <section aria-label="Player rename">
+                        ${canRename && html`<form class="pure-form controller-tools" onSubmit=${event => {
+                            event.preventDefault()
+                            window.mitty.emit('req_' + WsCommand.RENAME_PLAYER, {
+                                controller_serial: controller.serial, name: playerName ?? player_name ?? ''
+                            })
+                        }}>
+                            <label>Player name
+                                <input type="text" maxlength="20" required value=${playerName ?? player_name ?? ''}
+                                    onInput=${event => this.setState({playerName: event.target.value})} />
+                            </label>
+                            <button type="submit" class="pure-button">Rename</button>
+                        </form>`}
+                        ${renameFeedback && html`
+                            <p class="controller-field-status" role=${renameFeedback.error ? 'alert' : 'status'}>${renameFeedback.text}</p>
+                        `}
+                    </section>
+                `}
+                ${controllerState == PairingState.CONNECTED && controller.supports_song_search && html`
+                    <section aria-label="Song search">
+                        <form class="pure-form controller-tools" onSubmit=${event => {
+                            event.preventDefault()
+                            if (!controller.song_search_enabled) return
+                            const text = songQuery.trim()
+                            if (!text) {
+                                const field = event.currentTarget.elements.songQuery
+                                field.setCustomValidity('Enter a song title or artist.')
+                                field.reportValidity()
+                                return
+                            }
+                            this.setState({showSongResults: true})
+                            if (this.songResults) this.songResults.scrollTop = 0
+                            window.mitty.emit('req_' + WsCommand.SEARCH_INPUT, {
+                                controller_serial: controller.serial, text
+                            })
+                        }}>
+                            <label>Song title or artist
+                                <input type="search" name="songQuery" maxlength="100" aria-required="true" value=${songQuery}
+                                    disabled=${!controller.song_search_enabled}
+                                    onInput=${event => {
+                                        event.target.setCustomValidity('')
+                                        const text = event.target.value
+                                        const cleared = !text.trim()
+                                        this.setState({songQuery: text, showSongResults: showSongResults && !cleared})
+                                        if (cleared && showSongResults && controller.song_search_enabled) {
+                                            window.mitty.emit('req_' + WsCommand.SEARCH_INPUT, {
+                                                controller_serial: controller.serial, text: ''
+                                            })
+                                        }
+                                    }} />
+                            </label>
+                            <button type="submit" class="pure-button pure-button-primary"
+                                disabled=${!controller.song_search_enabled}>Search</button>
+                        </form>
+                        ${searchFeedback && html`
+                            <p class="controller-field-status" role=${searchFeedback.error ? 'alert' : 'status'}>${searchFeedback.text}</p>
+                        `}
+                        <p class="controller-field-status" role="status">${searchStatus}</p>
+                        ${songs.length > 0 && html`
+                            <div class="controller-song-results-panel">
+                                <ul class="controller-song-results" aria-label="Song search results"
+                                    ref=${element => this.songResults = element}>
+                                    ${songs.map(song => html`
+                                        <li key=${song.id}>
+                                            <button type="button" class="controller-song-result" disabled=${!controller.song_search_enabled}
+                                                title="Show in All Songs"
+                                                onClick=${() => window.mitty.emit('req_' + WsCommand.SELECT_SONG, {
+                                                    controller_serial: controller.serial, song: song.id
+                                                })}>
+                                                <span class="controller-song-details">
+                                                    <span class="controller-song-title">${song.name}</span>
+                                                    ${song.artist && html`<span class="controller-song-artist">${song.artist}</span>`}
+                                                </span>
+                                                <span class="controller-song-arrow" aria-hidden="true">›</span>
+                                            </button>
+                                        </li>
+                                    `)}
+                                </ul>
+                            </div>
+                        `}
+                    </section>
+                `}
             </li>
         `
     }
@@ -211,7 +372,7 @@ export class Controllers extends Component {
                 ${props.controllers.length > 0 && html`
                     <ul class="controllers-list">
                         ${props.controllers.map(item => (
-                            html`<${Controller} controller=${item} key=${item.serial} />`
+                            html`<${Controller} controller=${item} jdnow=${props.jdnow} key=${item.serial} />`
                         ))}
                     </ul>
                 `}

@@ -1,5 +1,8 @@
 import asyncio
 from collections import defaultdict
+from functools import partial
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -11,9 +14,99 @@ import dance
 from joydance.config_handler import ConfigHandler
 from joydance.constants import WsCommand
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.jdnow import web as jdnow_web
+from joydance.games.jdnow.game import JustDanceGameNow
 
 
 class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_jdnow_sign_in_only_imports_and_broadcasts_from_the_local_ui(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = ConfigHandler(str(Path(directory.name) / "config.cfg"))
+        app = web.Application()
+        app.update({"config_handler": config, "joydance_connections": {}, "websockets": set(),
+                    "controllers_info": {"left": {"serial": "left", "state": 0}},
+                    "jdnow_sign_in_lock": asyncio.Lock(), "jdnow_guest_lock": asyncio.Lock()})
+        app_path = str(Path(dance.__file__).resolve())
+        app.router.add_post("/jdnow/sign-in", partial(
+            jdnow_web.sign_in_handler, port=dance.WEB_PORT, app_path=app_path, broadcast=dance.ws_broadcast_response,
+        ))
+        app.router.add_get("/ws", dance.websocket_handler)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        browser = await client.ws_connect("/ws")
+        host = f"localhost:{dance.WEB_PORT}"
+        private_id = "private-linked-profile-1234"
+
+        def open_window_stub(_):
+            self.assertTrue(app["jdnow_sign_in_lock"].locked())
+            self.assertFalse(app["jdnow_guest_lock"].locked())
+            return "test-ubisoft-id"
+
+        def recover_stub(_):
+            self.assertTrue(app["jdnow_sign_in_lock"].locked())
+            self.assertTrue(app["jdnow_guest_lock"].locked())
+            return private_id, "Linked Dancer"
+
+        with (
+            patch.object(jdnow_web, "open_sign_in_window", side_effect=open_window_stub) as open_window,
+            patch.object(jdnow_web, "recover_profile", side_effect=recover_stub) as recover,
+        ):
+            async with client.post("/jdnow/sign-in", headers={"Host": host, "Origin": "https://example.com"}) as response:
+                self.assertEqual(response.status, 403)
+            open_window.assert_not_awaited()
+            async with client.post("/jdnow/sign-in", headers={"Host": host, "Origin": f"http://{host}"}) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(await response.json(), {})
+            open_window.assert_awaited_once_with(app_path)
+            recover.assert_awaited_once_with("test-ubisoft-id")
+        message = await browser.receive_json(timeout=1)
+        self.assertEqual(message["cmd"], "resp_update_controller_state")
+        linked, = message["data"]["jdnow_guests"]
+        self.assertEqual(linked["name"], "Ubisoft profile 1 · Linked Dancer")
+        self.assertEqual(config.get_jdnow_player_id("left", linked["key"]), private_id)
+        self.assertNotIn(private_id, str(message))
+
+    async def test_jdnow_web_actions_target_only_the_selected_controller(self):
+        first, second = [Mock(spec=JustDanceGameNow, search_songs=AsyncMock(), select_song=AsyncMock(),
+                              rename_player=AsyncMock(), on_state_changed=AsyncMock()) for _ in range(2)]
+        app = web.Application()
+        app.update({"websockets": set(), "joydance_connections": {"first": first, "second": second},
+                    "config_handler": SimpleNamespace(connections=[])})
+        app.router.add_get("/ws", dance.websocket_handler)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        browser = await client.ws_connect("/ws")
+        for command, field, value, handler in (
+            ("search_input", "text", "Magic", second.search_songs),
+            ("select_song", "song", "24K", second.select_song),
+            ("rename_player", "name", "New Dancer", second.rename_player),
+        ):
+            await browser.send_json({"cmd": command, "data": {"controller_serial": "second", field: value}})
+            if command == "rename_player":
+                self.assertEqual(await browser.receive_json(timeout=1), {
+                    "cmd": "resp_rename_player", "data": {"serial": "second", "submitted_name": value},
+                })
+            await browser.send_json({"cmd": "get_connections"})
+            self.assertEqual((await browser.receive_json(timeout=1))["cmd"], "resp_get_connections")
+            handler.assert_awaited_once_with(value)
+        for handler in (first.search_songs, first.select_song, first.rename_player):
+            handler.assert_not_awaited()
+        second.rename_player.side_effect = ValueError("Invalid player name.")
+        await browser.send_json({"cmd": "rename_player", "data": {"controller_serial": "second", "name": ""}})
+        await browser.send_json({"cmd": "get_connections"})
+        await browser.receive_json(timeout=1)
+        second.on_state_changed.assert_awaited_once_with({"player_rename_feedback": {"text": "Invalid player name.", "error": True}})
+
+        second.on_state_changed.reset_mock()
+        second.select_song.side_effect = ValueError("Unknown song.")
+        await browser.send_json({"cmd": "select_song", "data": {"controller_serial": "second", "song": "Unknown"}})
+        await browser.send_json({"cmd": "get_connections"})
+        await browser.receive_json(timeout=1)
+        second.on_state_changed.assert_awaited_once_with({"song_search_feedback": {"text": "Unknown song.", "error": True}})
+
     async def test_keyboard_replies_target_the_requesting_controller_from_either_browser(self):
         first = SimpleNamespace(is_connected=True, is_search_opened=True, send_message=AsyncMock())
         second = SimpleNamespace(is_connected=True, is_search_opened=True, send_message=AsyncMock())

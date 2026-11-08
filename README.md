@@ -16,6 +16,7 @@ https://youtu.be/f_1IkUHFdH8
 
 ## Features
 - Play Just Dance 2016+ on all platforms with Joy-Cons.
+- Play Just Dance Now in your browser with a Joy-Con, without a phone.
 - Playing with a Joy-Con (+ its strap) is safer and more comfortable than holding a phone.
 - No latency.
 - Better score than using a phone (hopefully).
@@ -124,13 +125,13 @@ pip3 install -r requirements.txt
 
     - **Pairing Method**:
 
-      |                    | Default        | Fast      | Stadia    | Old                   | JDMO 2021          | JD23+             |
-      |--------------------|----------------|-----------|-----------|-----------------------|--------------------|-------------------|
-      | Platforms          | All but Stadia | X1/PS/NSW | Stadia    | All, incl. PC & Wii U | PC                 | XSX/S, PS5, NSW   |
-      | Game versions      | 2020-2022      | 2020-2022 | 2020-2022 | 2016-2019             | 2021 mod           | 2023+             |
-      | Pairing Speed      | Slow           | Fast      | Slow      | Fast                  | Varies             | Service-dependent |
-      | Pairing Code       | Require        |           | Require   |                       | Require (6 digits) | Require (8 chars) |
-      | Private IP Address | Host           | Console   |           | PC/Console            | Host               | Not required      |
+      |                    | Default        | Fast      | Stadia    | Old                   | JDMO 2021          | JD23+             | Just Dance Now (testing) |
+      |--------------------|----------------|-----------|-----------|-----------------------|--------------------|-------------------|-------------------------|
+      | Platforms          | All but Stadia | X1/PS/NSW | Stadia    | All, incl. PC & Wii U | PC                 | XSX/S, PS5, NSW   | Web browser             |
+      | Game versions      | 2020-2022      | 2020-2022 | 2020-2022 | 2016-2019             | 2021 mod           | 2023+             | Now                     |
+      | Pairing Speed      | Slow           | Fast      | Slow      | Fast                  | Varies             | Service-dependent | Service-dependent       |
+      | Pairing Code       | Require        |           | Require   |                       | Require (6 digits) | Require (8 chars) | Dance Room (4–9 digits)  |
+      | Private IP Address | Host           | Console   |           | PC/Console            | Host               | Not required      | Not required            |
 
     - **Host Private IP**:
       - The private IP address of your PC/Mac/Linux running JoyDance. Find this in the Wi-Fi settings.
@@ -141,6 +142,9 @@ pip3 install -r requirements.txt
     - **Pairing Code**: get this from the game.
 
     - **JDMO 2021**: select **JDMO 2021: Pairing code** under Mods, enter the code shown by the game, and use the IP address of the computer running JoyDance as Host Private IP. JoyDance first looks for a local game with the matching code using UDP ports 6000/7000 and verifies its plaintext V2 WebSocket endpoint on port 8080 before selecting it, so a phone relay is not mistaken for the game. If no matching local game is found within five seconds, it uses JDMO's online pairing service and follows the address returned by it.
+
+    - For **Just Dance Now**, enter the **Dance Room** number shown in your browser. Pick a saved guest or **New guest** before connecting.
+      - For Ubisoft sign-in on Windows, run JoyDance from source with Microsoft Edge WebView2 and install `pywebview` with `python -m pip install pywebview==6.2.1`. Disconnect your JDNow controllers, click **Sign in with Ubisoft** in the local JoyDance UI, then choose the imported profile from the guest picker.
 
 7. Press the "Connect" button next to Joy-Con to start the pairing process.
 

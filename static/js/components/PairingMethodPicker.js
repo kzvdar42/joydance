@@ -18,6 +18,9 @@ export default class PairingMethodPicker extends Component {
         return html`
             <label for="stacked-state">Pairing Method</label>
             <select id="stacked-state" onChange=${this.onChange} value=${props.pairing_method}>
+                <optgroup label="Just Dance Now">
+                    <option value="${PairingMethod.JDNOW}">Just Dance Now: Dance Room number</option>
+                </optgroup>
                 <optgroup label="JD 2023 and later">
                     <option value="${PairingMethod.JD23}">JD23+: Pairing code</option>
                 </optgroup>

@@ -72,13 +72,11 @@ body {
 }
 
 
-.controllers .controllers-wrapper .controllers-list li {
+.controllers .controllers-wrapper .controllers-list > li {
     border-bottom: 1px solid #3f3f3f;
     padding: 16px 0;
     transition: background-color 0.2s ease;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    display: block;
 }
 
 
@@ -534,6 +532,129 @@ select option {
     align-items: center;
     display: inline-block;
     margin-right: 8px;
+}
+
+.controller-tools {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.controller-tools label {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 4px;
+    margin: 0;
+    min-width: 0;
+    font-size: 14px;
+}
+
+.pure-form.controller-tools input,
+.pure-form.controller-tools select {
+    margin: 0;
+}
+
+.controller-tools button {
+    flex: 0 0 auto;
+    width: auto;
+}
+
+.controller-message {
+    display: block;
+    margin-top: 6px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.controller-field-status[role="alert"] {
+    color: #ff9a96;
+}
+
+.controller-field-status {
+    color: #b9b6bf;
+    font-size: 13px;
+    margin: 10px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.controller-field-status:empty {
+    margin: 0;
+}
+
+.controller-song-results-panel {
+    margin-top: 8px;
+    padding: 4px;
+    border: 1px solid #45424b;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #211f24;
+}
+
+.controller-song-results {
+    max-height: min(18rem, 42vh);
+    overflow-y: auto;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    scrollbar-color: #68636f #211f24;
+}
+
+.controller-song-results li + li {
+    border-top: 1px solid #3d3a43;
+}
+
+.controller-song-result {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: #e1e1e1;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.controller-song-result:hover:not(:disabled),
+.controller-song-result:focus-visible {
+    background: #34313a;
+}
+
+.controller-song-result:focus-visible {
+    outline: 2px solid #90caf9;
+    outline-offset: -2px;
+}
+
+.controller-song-result:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.controller-song-details {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.controller-song-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.controller-song-artist {
+    color: #b9b6bf;
+    font-size: 12px;
+}
+
+.controller-song-arrow {
+    color: #90caf9;
+    font-size: 20px;
 }
 
 .ws-status {

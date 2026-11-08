@@ -1,12 +1,19 @@
 import asyncio
 from collections import defaultdict
+from contextlib import nullcontext
+from functools import partial
 import json
 import logging
 import os
 import sys
 import mimetypes
 import argparse
+from multiprocessing import freeze_support
 from urllib.parse import urlparse
+
+if __name__ == "__main__":
+    # Frozen scoring workers must branch off before importing the web server.
+    freeze_support()
 
 import aiohttp
 from aiohttp import WSMsgType, web
@@ -23,6 +30,10 @@ from joydance.controllers import update_controllers_list
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
 from joydance.games.justdance_2023 import JustDanceGame2023
+from joydance.games.jdnow import web as jdnow_web
+from joydance.games.jdnow.game import EMPTY_SONG_SEARCH, JustDanceGameNow
+from joydance.games.jdnow.workers import JDNowScoringWorkers
+from joydance.games.jdnow.signin import run_sign_in_window
 from joydance.games.discovery import discover_consoles
 from joydance.utils.network import normalize_console_url
 
@@ -41,6 +52,7 @@ def handle_task_exception(task):
 
 
 CONFIG_PATHS = get_config_paths(__file__)
+WEB_PORT = 32623
 
 
 async def update_controllers_info(app):
@@ -61,15 +73,32 @@ async def update_controllers_info(app):
             logger.error(f"Error initializing {controller.__class__.__name__} {controller.serial}: {e}", exc_info=True)
             continue
 
+    guest_states = jdnow_web.guest_states(app, [info["serial"] for info in controllers_info])
+    for info in controllers_info:
+        serial = info["serial"]
+        info.update(guest_states[serial])
+        app["controllers_info"][serial].update(guest_states[serial])
     return sorted(controllers_info, key=lambda x: (x["name"], x["color"], x["serial"]))
 
 
 async def connect_controller(app, ws, data) -> None:
+    scoring_workers = app.get("jdnow_scoring_workers")
+
+    def save_jdnow_guest(player_id, name):
+        if app["joydance_connections"].get(serial) is game_connection:
+            jdnow_web.require_available_guest(app, serial, player_id)
+            config_handler.save_jdnow_player_id(serial, player_id, name)
+
     async def on_joydance_state_changed(serial, update_dict):
         try:
             app["controllers_info"][serial].update(update_dict)
-            await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
             state = update_dict.get("state")
+            if is_jdnow:
+                if scoring_workers is not None and state == PairingState.CONNECTED.value:
+                    scoring_workers.prepare(sum(game.is_connected for game in app["joydance_connections"].values()
+                                                if isinstance(game, JustDanceGameNow)))
+                await jdnow_web.broadcast_guest_changes(app, ws_broadcast_response, excluding=serial)
+            await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
             if state is not None and (state == PairingState.DISCONNECTED.value or state >= PairingState.ERROR_CONTROLLER.value):
                 await ws_broadcast_response(app, WsCommand.HIDE_SEARCH, {"serial": serial})
         except Exception as e:
@@ -97,6 +126,7 @@ async def connect_controller(app, ws, data) -> None:
         controller = app["controllers"][serial]
 
         pairing_method = data["pairing_method"]
+        is_jdnow = pairing_method == PairingMethod.JDNOW.value
         host_ip_addr = data["host_ip_addr"]
         console_ip_addr = data["console_ip_addr"]
         pairing_code = data["pairing_code"]
@@ -109,34 +139,32 @@ async def connect_controller(app, ws, data) -> None:
                 raise ValueError("Discovered address does not match the console IP.")
             console_options["console_url"] = console_url
 
-        is_valid, error_msg = app["config_handler"].validate_config_with_error(data)
+        config_handler = app["config_handler"]
+        is_valid, error_msg = config_handler.validate_config_with_error(data)
         if not is_valid:
             logger.error(f"Configuration validation failed: {error_msg}")
             raise ValueError(f"Configuration validation failed: {error_msg}")
         if pairing_method == PairingMethod.JD23.value:
             pairing_code = pairing_code.upper()
 
+        uses_pairing_code = pairing_method in {
+            PairingMethod.DEFAULT.value, PairingMethod.STADIA.value,
+            PairingMethod.JDMO.value, PairingMethod.JD23.value, PairingMethod.JDNOW.value,
+        }
         async with app["joydance_connection_locks"][serial]:
-            config = app["config_handler"].data.copy()
-            config["pairing_code"] = pairing_code
-            config["pairing_method"] = pairing_method
-            config["host_ip_addr"] = host_ip_addr
-            config["console_ip_addr"] = console_ip_addr
-            app["config_handler"].data = config
-
-            if pairing_method in {
-                PairingMethod.DEFAULT.value, PairingMethod.STADIA.value,
-                PairingMethod.JDMO.value, PairingMethod.JD23.value,
-            }:
-                app["controllers_info"][serial]["pairing_code"] = pairing_code
-                console_ip_addr = None
-            else:
-                app["controllers_info"][serial]["pairing_code"] = ""
+            if is_jdnow:
+                player_id = config_handler.get_jdnow_player_id(serial, data.get("jdnow_guest"))
+                jdnow_web.require_available_guest(app, serial, player_id)
+                console_options["player_id"] = player_id
+                console_options["on_guest"] = save_jdnow_guest
+                console_options["scoring_workers"] = scoring_workers
 
             if pairing_method == PairingMethod.OLD.value:
                 game_class = JustDanceGameV1
             elif pairing_method == PairingMethod.JD23.value:
                 game_class = JustDanceGame2023
+            elif pairing_method == PairingMethod.JDNOW.value:
+                game_class = JustDanceGameNow
             else:
                 game_class = JustDanceGameV2
 
@@ -145,7 +173,7 @@ async def connect_controller(app, ws, data) -> None:
                 controller=controller,
                 pairing_code=pairing_code,
                 host_ip_addr=host_ip_addr,
-                console_ip_addr=console_ip_addr,
+                console_ip_addr=None if uses_pairing_code else console_ip_addr,
                 on_state_changed=on_joydance_state_changed,
                 on_game_message=on_game_message,
                 pairing_method=pairing_method,
@@ -156,10 +184,28 @@ async def connect_controller(app, ws, data) -> None:
             if previous_connection is not None:
                 await previous_connection.disconnect(should_reconnect=False)
 
-            app["joydance_connections"][serial] = game_connection
+            guest_lock = app["jdnow_guest_lock"] if is_jdnow else nullcontext()
+            async with guest_lock:
+                if is_jdnow:
+                    jdnow_web.require_available_guest(app, serial, player_id)
 
-            logger.debug(f"{serial}: connect_controller - starting pair() task")
-            task = await game_connection.start_pair()
+                config = config_handler.data.copy()
+                config["pairing_code"] = pairing_code
+                config["pairing_method"] = pairing_method
+                config["host_ip_addr"] = host_ip_addr
+                config["console_ip_addr"] = console_ip_addr
+                config_handler.data = config
+
+                app["controllers_info"].setdefault(serial, {}).update({
+                    "pairing_code": pairing_code if uses_pairing_code else "",
+                    "supports_song_search": False, "supports_player_rename": False,
+                    "song_search_enabled": False, **EMPTY_SONG_SEARCH,
+                    "player_color": None, "additional_message": None, "player_rename_feedback": None,
+                })
+                app["joydance_connections"][serial] = game_connection
+
+                logger.debug(f"{serial}: connect_controller - starting pair() task")
+                task = await game_connection.start_pair()
             task.add_done_callback(handle_task_exception)
             logger.debug(f"{serial}: connect_controller - completed successfully")
     except Exception as e:
@@ -357,16 +403,17 @@ async def websocket_handler(request):
                 try:
                     if cmd == WsCommand.GET_CONNECTIONS:
                         await ws_send_response(ws, cmd, request.app["config_handler"].connections)
-                    elif cmd == WsCommand.SEARCH_INPUT:
-                        text = data.get("text", "")
+                    elif cmd in {WsCommand.SEARCH_INPUT, WsCommand.SELECT_SONG, WsCommand.RENAME_PLAYER}:
                         serial = data.get("controller_serial")
                         if not isinstance(serial, str) or serial not in request.app["joydance_connections"]:
-                            logger.warning("SEARCH_INPUT received for unknown controller: %s", serial)
+                            logger.warning("%s received for unknown controller: %s", cmd.value, serial)
                             continue
                         joydance = request.app["joydance_connections"][serial]
-                        if joydance.is_connected and joydance.is_search_opened:
+                        if isinstance(joydance, JustDanceGameNow):
+                            await jdnow_web.handle_action(joydance, ws, cmd, data, send_response=ws_send_response)
+                        elif cmd == WsCommand.SEARCH_INPUT and joydance.is_connected and joydance.is_search_opened:
                             await joydance.send_message(
-                                "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": text}
+                                "JD_SubmitKeyboard_PhoneCommandData", {"keyboardOutput": data.get("text", "")}
                             )
                     elif cmd == WsCommand.GET_CONTROLLER_LIST:
                         controllers_info = await update_controllers_info(request.app)
@@ -418,6 +465,7 @@ def get_args():
     parser = argparse.ArgumentParser(prog="JoyDance")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--logs_filepath", default=None, help="Path to save logs to")
+    parser.add_argument("--jdnow-sign-in-window", action="store_true", help=argparse.SUPPRESS)
 
     return parser.parse_args()
 
@@ -438,6 +486,8 @@ def asyncio_exception_handler(loop, context):
 
 if __name__ == "__main__":
     args = get_args()
+    if args.jdnow_sign_in_window:
+        sys.exit(run_sign_in_window())
 
     # Set up logging
     logging_level = logging.DEBUG if args.debug else logging.INFO
@@ -452,6 +502,7 @@ if __name__ == "__main__":
 
     logger.info("Starting JoyDance application...")
 
+    scoring_workers = JDNowScoringWorkers()
     try:
         app = web.Application()
         # Need to manually set media type mapping for js, as windows has a
@@ -463,6 +514,9 @@ if __name__ == "__main__":
         app["joydance_connections"] = {}
         app["websockets"] = set()
         app["joydance_connection_locks"] = defaultdict(asyncio.Lock)
+        app["jdnow_guest_lock"] = asyncio.Lock()
+        app["jdnow_sign_in_lock"] = asyncio.Lock()
+        app["jdnow_scoring_workers"] = scoring_workers
         app["controllers"] = {}
         app["controllers_info"] = defaultdict(dict)
         app["config_handler"] = ConfigHandler(CONFIG_PATHS)
@@ -479,6 +533,10 @@ if __name__ == "__main__":
                 web.get("/discovery", discovery_handler),
                 web.get("/connections", connections_handler),
                 web.post("/connections", connections_handler),
+                web.post("/jdnow/sign-in", partial(
+                    jdnow_web.sign_in_handler, port=WEB_PORT, app_path=os.path.abspath(__file__),
+                    broadcast=ws_broadcast_response,
+                )),
                 web.delete("/connections/{id}", connections_handler),
                 web.static("/css", get_static_path("static/css")),
                 web.static("/js", get_static_path("static/js")),
@@ -488,7 +546,7 @@ if __name__ == "__main__":
         web.run_app(
             app,
             host="0.0.0.0",
-            port=32623,
+            port=WEB_PORT,
             print=lambda *args: print("======== Running on http://localhost:32623 ========"),
         )
     except KeyboardInterrupt:
@@ -496,3 +554,5 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical("Critical error in main: %s", e, exc_info=True)
         raise
+    finally:
+        scoring_workers.close()

@@ -5,12 +5,13 @@ export const PairingMethod = {
     OLD: 'old',
     JDMO: 'jdmo',
     JD23: 'jd23',
+    JDNOW: 'jdnow',
 }
 
 export const usesHostAddress = method => [PairingMethod.DEFAULT, PairingMethod.JDMO].includes(method)
-export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO, PairingMethod.JD23].includes(method)
+export const usesPairingCode = method => [PairingMethod.DEFAULT, PairingMethod.STADIA, PairingMethod.JDMO, PairingMethod.JD23, PairingMethod.JDNOW].includes(method)
 export const isValidPairingCode = (code, method) => typeof code === 'string' &&
-    (method === PairingMethod.JD23 ? /^[A-Za-z0-9]{8}$/ : /^[0-9]{6}$/).test(code)
+    (method === PairingMethod.JD23 ? /^[A-Za-z0-9]{8}$/ : method === PairingMethod.JDNOW ? /^[0-9]{4,9}$/ : /^[0-9]{6}$/).test(code)
 
 export const WsCommand = {
     GET_CONNECTIONS: 'get_connections',
@@ -19,6 +20,8 @@ export const WsCommand = {
     DISCONNECT_CONTROLLER: 'disconnect_controller',
     UPDATE_CONTROLLER_STATE: 'update_controller_state',
     SEARCH_INPUT: 'search_input',
+    SELECT_SONG: 'select_song',
+    RENAME_PLAYER: 'rename_player',
     SHOW_SEARCH: 'show_search',
     HIDE_SEARCH: 'hide_search',
     TOGGLE_RUMBLE: 'toggle_rumble',

@@ -12,6 +12,7 @@ from joydance.controllers.joycon.pycon.constants import JOYCON_L_PRODUCT_ID, JOY
 from joydance.controllers.joycon.pycon.event import ButtonEventJoyCon
 from joydance.games.justdance_v1 import JustDanceGameV1
 from joydance.games.justdance_v2 import JustDanceGameV2
+from joydance.games.jdnow.game import JustDanceGameNow
 
 
 def controller_with_buttons():
@@ -192,6 +193,40 @@ class ButtonMappingTests(unittest.TestCase):
 
 
 class GameInputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_jdnow_play_again_maps_to_y_only_for_the_main_player_on_results(self):
+        for product_id, button in ((JOYCON_R_PRODUCT_ID, "y"), (JOYCON_L_PRODUCT_ID, "left"),
+                                   (JOYCON_PRO_PRODUCT_ID, "y")):
+            with self.subTest(product_id=product_id):
+                controller = controller_with_buttons()
+                controller.product_id = product_id
+                game = JustDanceGameNow(controller, on_state_changed=AsyncMock())
+                game.is_connected = game._is_main_player = True
+                await game.on_state_changed({})
+                self.assertIsNone(press(controller, button))
+                game._phase = "results"
+                await game.on_state_changed({})
+                self.assertEqual(press(controller, button), Command.VIDEO_RESTART)
+                game._is_main_player = False
+                await game.on_state_changed({})
+                self.assertIsNone(press(controller, button))
+
+    async def test_jdnow_tab_button_maps_to_x_on_each_controller_and_is_disabled_during_dance(self):
+        for product_id, button in ((JOYCON_R_PRODUCT_ID, "x"), (JOYCON_L_PRODUCT_ID, "up"),
+                                   (JOYCON_PRO_PRODUCT_ID, "x")):
+            with self.subTest(product_id=product_id):
+                controller = controller_with_buttons()
+                controller.product_id = product_id
+                game = JustDanceGameNow(controller, on_state_changed=AsyncMock())
+                game.is_connected = game._is_main_player = True
+                await game.on_state_changed({})
+                self.assertEqual(press(controller, button), Command.GOTO_PLAYLISTSTAB)
+                game._tab = "playlist"
+                await game.on_state_changed({})
+                self.assertEqual(press(controller, button), Command.GOTO_SONGSTAB)
+                game.should_start_accelerometer = True
+                await game.on_state_changed({})
+                self.assertIsNone(press(controller, button))
+
     async def asyncSetUp(self):
         self.controller = controller_with_buttons()
         self.game = JustDanceGameV1(

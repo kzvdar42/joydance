@@ -49,6 +49,8 @@ class WsCommand(Enum):
     DISCONNECT_CONTROLLER = "disconnect_controller"
     UPDATE_CONTROLLER_STATE = "update_controller_state"
     SEARCH_INPUT = "search_input"
+    SELECT_SONG = "select_song"
+    RENAME_PLAYER = "rename_player"
     SHOW_SEARCH = "show_search"
     HIDE_SEARCH = "hide_search"
     TOGGLE_RUMBLE = "toggle_rumble"
@@ -61,6 +63,7 @@ class PairingMethod(Enum):
     OLD = "old"
     JDMO = "jdmo"
     JD23 = "jd23"
+    JDNOW = "jdnow"
 
 
 class UiLayer(Enum):

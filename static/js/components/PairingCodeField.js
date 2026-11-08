@@ -16,14 +16,15 @@ export default class PairingCodeField extends Component {
     render(props) {
         const requiresCode = usesPairingCode(props.pairing_method)
         const jd23 = props.pairing_method === PairingMethod.JD23
+        const jdnow = props.pairing_method === PairingMethod.JDNOW
         return html`
-            <label for="pairingCode">Pairing Code</label>
+            <label for="pairingCode">${jdnow ? 'Dance Room number' : 'Pairing Code'}</label>
             ${requiresCode && html`
                 <input required id="pairingCode" type="text"
                     inputmode=${jd23 ? 'text' : 'decimal'} autocapitalize="characters" spellcheck="false"
-                    value=${props.pairing_code} placeholder=${jd23 ? 'ABCD1234' : '000000'}
-                    maxlength=${jd23 ? 8 : 6} size=${jd23 ? 8 : 6}
-                    pattern=${jd23 ? '[A-Za-z0-9]{8}' : '[0-9]{6}'}
+                    value=${props.pairing_code} placeholder=${jd23 ? 'ABCD1234' : jdnow ? 'e.g. 34017' : '000000'}
+                    maxlength=${jd23 ? 8 : jdnow ? 9 : 6} size=${jd23 ? 8 : jdnow ? 9 : 6}
+                    pattern=${jd23 ? '[A-Za-z0-9]{8}' : jdnow ? '[0-9]{4,9}' : '[0-9]{6}'}
                     onKeyPress=${(e) => e.key.length === 1 && !(jd23 ? /[A-Za-z0-9]/ : /[0-9]/).test(e.key) && e.preventDefault()}
                     onChange=${this.onChange} />
             `}
