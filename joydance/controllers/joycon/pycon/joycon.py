@@ -79,7 +79,7 @@ class JoyCon:
 
         # connection state
         self._joycon_device = None
-        self._update_input_report_thread = None
+        self._input_reader_thread = None
         self._input_reader_gate = threading.Event()
         self._input_reader_lock = threading.Lock()
         self.is_connected = threading.Event()
@@ -245,7 +245,7 @@ class JoyCon:
                     self.is_connected.clear()
 
                 if reopening_after_close:
-                    previous_reader = self._update_input_report_thread
+                    previous_reader = self._input_reader_thread
                     if previous_reader is not None and previous_reader.is_alive():
                         await self._run_in_thread(
                             previous_reader.join,
@@ -331,13 +331,13 @@ class JoyCon:
 
                 started_new_input_thread = False
                 if (
-                    self._update_input_report_thread is None
-                    or not self._update_input_report_thread.is_alive()
+                    self._input_reader_thread is None
+                    or not self._input_reader_thread.is_alive()
                 ):
-                    self._update_input_report_thread = threading.Thread(
-                        target=self._update_input_report, daemon=True,
+                    self._input_reader_thread = threading.Thread(
+                        target=self._run_input_reader, daemon=True,
                     )
-                    self._update_input_report_thread.start()
+                    self._input_reader_thread.start()
                     started_new_input_thread = True
                 self._ensure_connection_attempt_is_current(
                     connection_generation,
@@ -551,7 +551,7 @@ class JoyCon:
             self.is_connected.clear()
             self._input_report_deadline = None
 
-    def _update_input_report(self):
+    def _run_input_reader(self):
         next_mode_restore = 0
         while self._should_run.is_set():
             if not self._input_reader_gate.wait(self._INPUT_READ_TIMEOUT_MS / 1000):
@@ -596,7 +596,7 @@ class JoyCon:
                 except Exception:
                     logger.exception("%s %s: Unexpected error in input report:", id(self), self.serial)
             time.sleep(self.reconnect_timeout)
-        self._update_input_report_thread = None
+        self._input_reader_thread = None
 
     def _read_input_report(self) -> bytes:
         if self._joycon_device:

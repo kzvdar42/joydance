@@ -310,7 +310,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     ) as connect_hid,
                     patch.object(
                         joycon,
-                        "_update_input_report",
+                        "_run_input_reader",
                         side_effect=joycon.is_connected.set,
                     ),
                 ):
@@ -653,8 +653,8 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(joycon, "_schedule_reconnect_from_reader"),
                     patch("joydance.controllers.joycon.pycon.joycon.logger"),
                 ):
-                    reader = threading.Thread(target=joycon._update_input_report, daemon=True)
-                    joycon._update_input_report_thread = reader
+                    reader = threading.Thread(target=joycon._run_input_reader, daemon=True)
+                    joycon._input_reader_thread = reader
                     reader.start()
                     connection = None
                     try:
@@ -749,7 +749,7 @@ class JoyConReportTests(unittest.TestCase):
             patch.object(joycon, "_schedule_reconnect_from_reader") as reconnect,
         ):
             joycon._publish_input_report(b"\x30" + bytes(48))
-            joycon._update_input_report()
+            joycon._run_input_reader()
         device.close.assert_called_once()
         self.assertFalse(joycon.is_connected.is_set())
         logger.exception.assert_not_called()
@@ -783,7 +783,7 @@ class JoyConReportTests(unittest.TestCase):
                     patch.object(joycon, "_schedule_reconnect_from_reader", side_effect=joycon._should_run.clear) as reconnect,
                 ):
                     joycon._publish_input_report(b"\x30" + bytes(48))
-                    joycon._update_input_report()
+                    joycon._run_input_reader()
                 self.assertFalse(joycon.is_connected.is_set())
                 device.close.assert_called_once()
                 reconnect.assert_called_once()
@@ -820,7 +820,7 @@ class JoyConReportTests(unittest.TestCase):
                 ):
                     joycon._publish_input_report(full_report)
                     joycon.register_update_hook(stop)
-                    joycon._update_input_report()
+                    joycon._run_input_reader()
                 self.assertTrue(joycon.is_connected.is_set())
                 self.assertEqual(device.read.call_count, 4)
                 device.close.assert_not_called()
@@ -843,7 +843,7 @@ class JoyConReportTests(unittest.TestCase):
             clock = 10
             joycon._input_reader_gate.set()
             joycon.register_update_hook(lambda controller: controller._should_run.clear())
-            joycon._update_input_report()
+            joycon._run_input_reader()
         self.assertTrue(joycon.is_connected.is_set())
         self.assertEqual(device.read.call_count, 2)
         device.close.assert_not_called()
@@ -867,7 +867,7 @@ class JoyConReportTests(unittest.TestCase):
             return result
 
         with patch.object(joycon._input_reader_gate, "wait", side_effect=wait):
-            reader = threading.Thread(target=joycon._update_input_report, daemon=True)
+            reader = threading.Thread(target=joycon._run_input_reader, daemon=True)
             try:
                 with joycon._input_reader_lock:
                     reader.start()

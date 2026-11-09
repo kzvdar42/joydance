@@ -83,7 +83,7 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
                 joycon._joycon_device = device
                 joycon.register_update_hook(lambda device: device._should_run.clear())
                 with patch("joydance.controllers.joycon.pycon.joycon.logger.warning") as warning:
-                    joycon._update_input_report()
+                    joycon._run_input_reader()
 
                 self.assertTrue(restored)
                 warning.assert_called_once()
@@ -119,7 +119,7 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
             patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock),
             self.assertLogs("joydance.controllers.joycon.pycon.joycon", level="WARNING") as logs,
         ):
-            joycon._update_input_report()
+            joycon._run_input_reader()
         self.assertEqual(restore.call_count, 3)
         self.assertEqual(len(logs.output), 2)
 
