@@ -1,13 +1,22 @@
 <!doctype html>
 <!-- Serve with static/ mounted at / and this file at /tests/test_jd23_ui.html. No backend or console calls. -->
-<html><head><meta charset="utf-8"><title>JD23+ pairing check</title>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JD23+ pairing check</title>
 <link rel="stylesheet" href="/css/pure-min.css"><link rel="stylesheet" href="/css/app.css">
 <script src="/js/mitt.umd.js"></script></head><body><script type="module">
 window.PAIRING_RULES = await (await fetch('/pairing_rules.json')).json();
 window.CONFIG = {pairing_method:'jd23',host_ip_addr:'',console_ip_addr:'',pairing_code:'ABCD1234'};
 window.CONNECTIONS = [{...window.CONFIG,id:'a'.repeat(32),name:'JD23+ console'}];
 window.VERSION = 'JD23+ pairing check';
-const requests = [], alerts = [];
+const requests = [], alerts = [], writes = [];
+const browserFetch = window.fetch;
+window.fetch = async (url, options = {}) => {
+    if (url === '/connections' && options.method === 'POST') {
+        const connection = JSON.parse(options.body);
+        writes.push(connection);
+        return {ok:true,json:async () => ({connection,connections:[connection]})};
+    }
+    return browserFetch(url, options);
+};
 window.alert = message => alerts.push(message);
 window.WebSocket = class {
     static OPEN = 1;
@@ -24,15 +33,66 @@ try {
     check(document.querySelector('#stacked-state').value === 'jd23', 'Saved JD23+ selection missing');
     check(!document.querySelector('#ipAddr'), 'JD23+ must not require a host IP');
     const code = document.querySelector('#pairingCode');
-    check(code.maxLength === 8 && code.pattern === '[A-Za-z0-9]{8}', 'Eight-character code field missing');
-    code.value = 'abcd1234';
-    code.dispatchEvent(new Event('change', {bubbles:true}));
+    check(code.maxLength === 11 && code.value === 'AB-CD-12-34' && code.checkValidity(), 'Grouped eight-character code field missing');
+    check(getComputedStyle(code).boxShadow === 'none' && code.getBoundingClientRect().height === 40,
+        'Pairing fields must use the flat input style');
+    code.focus();
+    code.value = '';
+    code.dispatchEvent(new Event('input', {bubbles:true}));
     await settle();
-    check(document.querySelector('#pairingCode').value === 'ABCD1234', 'Code was not normalized');
+    for (const character of 'abcd1234') {
+        code.setRangeText(character, code.selectionStart, code.selectionEnd, 'end');
+        code.dispatchEvent(new InputEvent('input', {bubbles:true,inputType:'insertText',data:character}));
+        await settle();
+    }
+    check(code.value === 'AB-CD-12-34' && code.selectionStart === 11 && code.checkValidity(),
+        'Typing must group and uppercase the code without moving the caret away from the end');
+    for (const [type, caret, expected, position] of [
+        ['deleteContentBackward',3,'AC-D1-23-4',1],
+        ['deleteContentForward',2,'AB-D1-23-4',2],
+    ]) {
+        code.value = 'AB-CD-12-34';
+        code.setSelectionRange(caret, caret);
+        code.dispatchEvent(new InputEvent('beforeinput', {bubbles:true,cancelable:true,inputType:type}));
+        const start = code.selectionStart - (type === 'deleteContentBackward' ? 1 : 0);
+        code.setRangeText('', start, start + 1, 'end');
+        code.dispatchEvent(new InputEvent('input', {bubbles:true,inputType:type}));
+        await settle();
+        check(code.value === expected && code.selectionStart === position,
+            'Deleting beside a separator must delete a character and keep the caret in place');
+    }
+    code.value = 'ab-cd-12-34';
+    code.dispatchEvent(new InputEvent('input', {bubbles:true,inputType:'insertFromPaste'}));
+    await settle();
+    check(code.value === 'AB-CD-12-34' && code.checkValidity(), 'Pasted grouped codes must normalize');
+    code.value = '01-23-45-67';
+    code.dispatchEvent(new InputEvent('input', {bubbles:true,inputType:'insertFromPaste'}));
+    await settle();
+    document.querySelector('.connection-editor').requestSubmit();
+    await settle();
+    check(writes.at(-1)?.pairing_code === '01234567', 'Saving must send the unformatted code and preserve its leading zero');
     window.mitty.emit('req_connect_controller', 'test-controller');
     await settle();
     const request = requests.find(item => item.cmd === 'connect_controller');
-    check(alerts.length === 0 && request?.data.pairing_code === 'ABCD1234' && request.data.pairing_method === 'jd23', 'Connect was blocked or sent the wrong protocol/code');
+    check(alerts.length === 0 && request?.data.pairing_code === '01234567' && request.data.pairing_method === 'jd23', 'Connect was blocked or sent the wrong protocol/code');
+    document.querySelector('.connections-list button').click();
+    await settle();
+    const method = document.querySelector('#stacked-state');
+    method.value = 'jdnow';
+    method.dispatchEvent(new Event('change', {bubbles:true}));
+    await settle();
+    const room = document.querySelector('#pairingCode');
+    room.value = '034017';
+    room.dispatchEvent(new Event('input', {bubbles:true}));
+    await settle();
+    check(room.value === '034017' && room.checkValidity(), 'JDNow room numbers must remain ungrouped');
+    method.value = 'jd23';
+    method.dispatchEvent(new Event('change', {bubbles:true}));
+    await settle();
+    const restored = document.querySelector('#pairingCode');
+    restored.value = '01234567';
+    restored.dispatchEvent(new Event('input', {bubbles:true}));
+    await settle();
     const result = document.createElement('p'); result.id='test-result';
     result.textContent='PASS: saved JD23+ selection, no host IP, uppercase eight-character code, and connection request.';
     document.body.append(result);

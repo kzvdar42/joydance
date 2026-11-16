@@ -1,6 +1,6 @@
 import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
-import { PairingMethod, WsCommand, isPrivateIPv4, pairingAddressField, usesPairingCode } from '/js/consts.js';
+import { PairingMethod, WsCommand, formatPairingCode, isPrivateIPv4, pairingAddressField, usesPairingCode } from '/js/consts.js';
 import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
@@ -167,7 +167,7 @@ export default class Connections extends Component {
                                     <input type="radio" name="connection" checked=${state.selected === key} disabled=${state.saving} onChange=${() => this.select(connection)} />
                                     <span><strong>${connection.name}</strong>
                                         <span class="connection-source">${connection.id ? 'Saved' : 'Local'}${connection.id && localKeys.has(connectionKey(connection)) ? ' · Local' : ''}</span>
-                                        <small>${methodNames[connection.pairing_method]} · ${usesPairingCode(connection.pairing_method) ? 'Code ' + connection.pairing_code : connection.console_ip_addr}</small>
+                                        <small>${methodNames[connection.pairing_method]} · ${usesPairingCode(connection.pairing_method) ? 'Code ' + formatPairingCode(connection.pairing_code, connection.pairing_method) : connection.console_ip_addr}</small>
                                     </span>
                                 </label>
                                 <div class="connection-actions">

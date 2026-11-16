@@ -23,7 +23,7 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 const change = async (selector, value) => {
     const field = document.querySelector(selector);
     field.value = value;
-    field.dispatchEvent(new Event('change', {bubbles:true}));
+    field.dispatchEvent(new Event(selector === '#pairingCode' ? 'input' : 'change', {bubbles:true}));
     await settle();
 };
 const connect = async () => { window.mitty.emit('req_' + WsCommand.CONNECT_CONTROLLER, 'test'); await settle(); };
@@ -56,7 +56,7 @@ try {
     check(document.querySelector('#pairingCode').readOnly, 'Fast mode must not require a code');
     await change('#stacked-state', 'jdmo');
     check(document.querySelector('#ipAddr').value === '192.168.1.9', 'Switching methods must preserve the host address');
-    check(document.querySelector('#pairingCode').value === '012345', 'Switching methods must preserve the code');
+    check(document.querySelector('#pairingCode').value === '01-23-45', 'Switching methods must preserve the code');
     window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_get_controller_list',data:[{
         serial:'test',name:'Pro Controller',controller_type:'pro_controller',color:'#383638',color_buttons:'#222',state:0,battery_level:4,
     }]})});

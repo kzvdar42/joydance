@@ -12,6 +12,8 @@ export const pairingAddressField = method => window.PAIRING_RULES?.methods[metho
 export const usesHostAddress = method => pairingAddressField(method) === 'host_ip_addr'
 export const pairingCodeRule = method => window.PAIRING_RULES?.codes[window.PAIRING_RULES.methods[method]?.code]
 export const usesPairingCode = method => Boolean(pairingCodeRule(method))
+export const formatPairingCode = (code = '', method) => method === PairingMethod.JDNOW
+    ? code : code.replace(/(.{2})(?=.)/gu, '$1-')
 export const pairingCodeCharacters = rule => rule.browser_characters ?? rule.characters
 export const pairingCodePattern = rule => pairingCodeCharacters(rule) + (rule.min_length === rule.max_length
     ? `{${rule.max_length}}` : `{${rule.min_length},${rule.max_length}}`)
