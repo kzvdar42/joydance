@@ -13,12 +13,45 @@ from aiohttp.test_utils import TestClient, TestServer
 import dance
 from joydance.config_handler import ConfigHandler
 from joydance.constants import WsCommand
+from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
+from joydance.controllers.joycon.pycon.constants import JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID
 from joydance.games.v2.game import JustDanceGameV2
 from joydance.games.jdnow import web as jdnow_web
 from joydance.games.jdnow.game import JustDanceGameNow
 
 
 class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rumble_can_be_toggled_before_pairing_and_keeps_state_on_refresh(self):
+        controller = JoyConWrapper(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "rumble-test")
+        self.addCleanup(controller.close)
+        controller.battery_level = AsyncMock(return_value=4)
+        app = web.Application()
+        app.update({"controllers": {controller.serial: controller}, "joydance_connections": {},
+                    "controllers_info": {controller.serial: {"serial": controller.serial, "state": 0}},
+                    "websockets": set()})
+        app.router.add_get("/ws", dance.websocket_handler)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        browser = await client.ws_connect("/ws")
+
+        async def toggle(enabled):
+            await browser.send_json({"cmd": "toggle_rumble", "data": {
+                "controller_serial": controller.serial, "enabled": enabled,
+            }})
+            response = await browser.receive_json(timeout=1)
+            self.assertEqual(response["cmd"], "resp_update_controller_state")
+            self.assertEqual(response["data"]["rumble_enabled"], enabled)
+            self.assertEqual((await controller.get_state())["rumble_enabled"], enabled)
+            self.assertEqual(controller.joycon.rumble_enabled, enabled)
+
+        await toggle(False)
+        game = JustDanceGameV2(controller)
+        app["joydance_connections"][controller.serial] = game
+        self.assertFalse((await game.get_state())["rumble_enabled"])
+        await toggle(True)
+        self.assertTrue((await game.get_state(False))["rumble_enabled"])
+
     async def test_jdnow_sign_in_only_imports_and_broadcasts_from_the_local_ui(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

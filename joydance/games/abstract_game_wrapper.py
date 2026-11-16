@@ -41,6 +41,7 @@ class AbstractGameWrapper(ABC):
 
     def set_rumble(self, enabled):
         self.controller.set_rumble(enabled)
+        self._state["rumble_enabled"] = enabled
 
     def get_random_port(self):
         """Randomize a port number, to be used in hole_punching() later"""

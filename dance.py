@@ -351,16 +351,18 @@ async def ws_broadcast_response(app, cmd, data):
 
 async def toggle_rumble(app, ws, data):
     try:
-        serial = data["controller_serial"]
+        if not isinstance(data, dict) or type(data.get("enabled")) is not bool:
+            raise ValueError("Invalid rumble setting.")
+        serial = data.get("controller_serial")
         enabled = data["enabled"]
         logger.debug(f"toggle_rumble: serial={serial}, enabled={enabled}")
 
-        if serial not in app["joydance_connections"]:
+        if not isinstance(serial, str) or serial not in app["controllers"]:
             logger.warning(f"Attempted to toggle rumble for unknown controller: {serial}")
             return
 
-        joydance = app["joydance_connections"][serial]
-        joydance.set_rumble(enabled)
+        target = app["joydance_connections"].get(serial, app["controllers"][serial])
+        target.set_rumble(enabled)
         # Update the info for UI
         if serial in app["controllers_info"]:
             app["controllers_info"][serial]["rumble_enabled"] = enabled

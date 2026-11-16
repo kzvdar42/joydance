@@ -4,6 +4,7 @@ import { PairingMethod, WsCommand, isPrivateIPv4, pairingAddressField, usesPairi
 import PairingMethodPicker from '/js/components/PairingMethodPicker.js';
 import IpAddressField from '/js/components/IpAddressField.js';
 import PairingCodeField from '/js/components/PairingCodeField.js';
+import ActionIcon from '/js/components/ActionIcon.js';
 
 const methodNames = {default:'Just Dance', fast:'Fast', stadia:'Stadia', old:'Legacy', jdmo:'JDMO 2021', jd23:'JD23+', jdnow:'Just Dance Now'};
 const connectionKey = connection => usesPairingCode(connection.pairing_method) ? (connection.pairing_method === PairingMethod.JDNOW ? 'jdnow:' : 'code:') + connection.pairing_code :
@@ -17,6 +18,7 @@ export default class Connections extends Component {
         this.state = { saved: window.CONNECTIONS || [], local: [], selected: null, draft: null, scanning: false, saving: false, error: '', message: '' }
         this.scan = this.scan.bind(this)
         this.save = this.save.bind(this)
+        this.closeEditor = this.closeEditor.bind(this)
         this.onSavedConnections = this.onSavedConnections.bind(this)
     }
 
@@ -49,7 +51,16 @@ export default class Connections extends Component {
         this.setState({ draft: {
             ...this.props.config, name: '', ...connection,
             host_ip_addr: isPrivateIPv4(window.location.hostname) ? window.location.hostname : (connection.host_ip_addr || this.props.config.host_ip_addr),
-        }, error: '' }, () => document.getElementById('connectionName')?.focus())
+        }, error: '' }, () => {
+            this.editorDialog.showModal()
+            document.getElementById('connectionName').focus()
+        })
+    }
+
+    closeEditor() {
+        if (this.state.saving) return
+        this.editorDialog.close()
+        this.setState({draft:null, error:''})
     }
 
     changeDraft(key, value) {
@@ -74,7 +85,8 @@ export default class Connections extends Component {
             if (!response.ok) throw new Error(data.error || 'Could not save this connection.')
             this.onSavedConnections(data.connections)
             this.select(data.connection)
-            this.setState({ draft: null })
+            // Re-enable the opener before the dialog restores focus.
+            this.setState({ saving: false }, this.closeEditor)
         } catch (error) {
             if (error.name !== 'AbortError') this.setState({ error: error.message })
         } finally {
@@ -135,8 +147,11 @@ export default class Connections extends Component {
                 <div class="connections-heading">
                     <h2>Connections</h2>
                     <div class="connection-actions">
-                        <button type="button" class="pure-button" disabled=${state.scanning} onClick=${this.scan}>${state.scanning ? 'Scanning…' : 'Scan network'}</button>
-                        <button type="button" class="pure-button pure-button-primary" disabled=${state.saving} onClick=${() => this.newDraft()}>Add connection</button>
+                        <button type="button" class="pure-button icon-button" disabled=${state.scanning} aria-busy=${state.scanning}
+                            aria-label=${state.scanning ? 'Scanning…' : 'Scan network'} title=${state.scanning ? 'Scanning…' : 'Scan network'}
+                            onClick=${this.scan}><${ActionIcon} name=${state.scanning ? 'loading' : 'scan'} /></button>
+                        <button type="button" class="pure-button pure-button-primary icon-button" disabled=${state.saving}
+                            aria-label="Add connection" title="Add connection" onClick=${() => this.newDraft()}><${ActionIcon} name="add" /></button>
                     </div>
                 </div>
                 <p>Choose a connection, then connect a controller below.</p>
@@ -156,8 +171,12 @@ export default class Connections extends Component {
                                     </span>
                                 </label>
                                 <div class="connection-actions">
-                                    <button type="button" class="pure-button" disabled=${state.saving} aria-label=${(connection.id ? 'Edit ' : 'Save ') + connection.name} onClick=${() => this.newDraft(connection)}>${connection.id ? 'Edit' : 'Save'}</button>
-                                    ${connection.id && html`<button type="button" class="pure-button pure-button-error" disabled=${state.saving} aria-label=${'Delete ' + connection.name} onClick=${() => this.remove(connection)}>Delete</button>`}
+                                    <button type="button" class=${`pure-button${connection.id ? ' icon-button' : ''}`} disabled=${state.saving}
+                                        aria-label=${(connection.id ? 'Edit ' : 'Save ') + connection.name} title=${connection.id ? 'Edit connection' : 'Save connection'}
+                                        onClick=${() => this.newDraft(connection)}>${connection.id ? html`<${ActionIcon} name="edit" />` : 'Save'}</button>
+                                    ${connection.id && html`<button type="button" class="pure-button pure-button-error icon-button" disabled=${state.saving}
+                                        aria-label=${'Delete ' + connection.name} title="Delete connection"
+                                        onClick=${() => this.remove(connection)}><${ActionIcon} name="delete" /></button>`}
                                 </div>
                             </li>
                         `
@@ -167,25 +186,38 @@ export default class Connections extends Component {
                     <p>For JDMO 2021, use Save to choose its pairing method before connecting.</p>
                 `}
                 ${draft && html`
-                    <form class="pure-form pure-form-stacked connection-editor" onSubmit=${this.save}>
-                        <fieldset disabled=${state.saving}>
-                            <legend>${draft.id ? 'Edit connection' : 'Save connection'}</legend>
-                            <div class="pure-g">
-                                <div class="pure-u-1">
-                                    <label for="connectionName">Name</label>
-                                    <input required id="connectionName" maxlength="80" value=${draft.name} placeholder="e.g. Living room" onChange=${event => this.changeDraft('name', event.target.value)} />
+                    <dialog class="connection-dialog" aria-labelledby="connection-editor-title"
+                        ref=${element => this.editorDialog = element}
+                        onCancel=${event => { event.preventDefault(); this.closeEditor() }}>
+                        <div class="connection-dialog-heading">
+                            <h3 id="connection-editor-title">${draft.id ? 'Edit connection' : 'Add connection'}</h3>
+                            <button type="button" class="pure-button icon-button" disabled=${state.saving}
+                                aria-label="Close connection editor" title="Close" onClick=${this.closeEditor}>
+                                <${ActionIcon} name="close" />
+                            </button>
+                        </div>
+                        <form class="pure-form pure-form-stacked connection-editor" onSubmit=${this.save}>
+                            <fieldset disabled=${state.saving}>
+                                <div class="pure-g">
+                                    <div class="pure-u-1">
+                                        <label for="connectionName">Name</label>
+                                        <input required id="connectionName" maxlength="80" value=${draft.name} placeholder="e.g. Living room" onChange=${event => this.changeDraft('name', event.target.value)} />
+                                    </div>
+                                    <div class="pure-u-1"><${PairingMethodPicker} pairing_method=${draft.pairing_method} onChange=${value => this.changeDraft('pairing_method', value)} /></div>
+                                    ${pairingAddressField(draft.pairing_method) && html`
+                                        <div class="pure-u-1-2"><${IpAddressField} ...${draft} onChange=${value => this.changeDraft(pairingAddressField(draft.pairing_method), value)} /></div>
+                                    `}
+                                    <div class=${pairingAddressField(draft.pairing_method) ? 'pure-u-1-2' : 'pure-u-1'}>
+                                        <${PairingCodeField} ...${draft} onChange=${value => this.changeDraft('pairing_code', value)} />
+                                    </div>
                                 </div>
-                                <div class="pure-u-1"><${PairingMethodPicker} pairing_method=${draft.pairing_method} onChange=${value => this.changeDraft('pairing_method', value)} /></div>
-                                <div class="pure-u-1-2"><${IpAddressField} ...${draft} onChange=${value => this.changeDraft(pairingAddressField(draft.pairing_method), value)} /></div>
-                                <div class="pure-u-1-2"><${PairingCodeField} ...${draft} onChange=${value => this.changeDraft('pairing_code', value)} /></div>
-                            </div>
-                            ${state.error && html`<p class="connection-error" role="alert">${state.error}</p>`}
-                            <div class="connection-actions">
-                                <button type="submit" class="pure-button pure-button-primary">${state.saving ? 'Saving…' : 'Save connection'}</button>
-                                <button type="button" class="pure-button" onClick=${() => this.setState({draft:null, error:''})}>Cancel</button>
-                            </div>
-                        </fieldset>
-                    </form>
+                                ${state.error && html`<p class="connection-error" role="alert">${state.error}</p>`}
+                                <div class="connection-actions">
+                                    <button type="submit" class="pure-button pure-button-primary">${state.saving ? 'Saving…' : draft.id ? 'Save changes' : 'Add connection'}</button>
+                                </div>
+                            </fieldset>
+                        </form>
+                    </dialog>
                 `}
             </section>
         `

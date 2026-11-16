@@ -25,9 +25,33 @@ const controllers = [
     {serial:'left',name:'JoyCon L',controller_type:'joycon_left',color:'#19bee4'},
     {serial:'right',name:'JoyCon R',controller_type:'joycon_right',color:'#ef483e'},
     {serial:'pro',name:'Pro Controller',controller_type:'pro_controller',color:'#383638',color_buttons:'#222'},
-].map(controller=>({...controller,state:0,battery_level:4}));
+].map(controller=>({...controller,state:0,battery_level:4,rumble_enabled:true}));
 const settle = () => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 const check = (condition, message) => { if (!condition) throw new Error(message); };
+const checkActionsLayout = row => {
+    const actions = row.querySelector('.controller-actions');
+    const mainButton = actions.querySelector('button');
+    const main = mainButton.getBoundingClientRect();
+    const label = document.createRange();
+    label.selectNodeContents(mainButton);
+    const style = getComputedStyle(mainButton);
+    check(label.getBoundingClientRect().width <= main.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        'Connection button labels must fit without clipping');
+    const utility = actions.querySelector('.controller-utility-actions').getBoundingClientRect();
+    check([...actions.querySelectorAll('.icon-button')].every(button => {
+        const icon = button.getBoundingClientRect();
+        return icon.width === main.height && icon.height === main.height;
+    }), 'Icon buttons must be square and match the text button height');
+    if (matchMedia('(max-width: 450px)').matches) {
+        check(Math.abs(main.top - utility.top) < 1 && Math.abs(utility.left - main.right - 8) < 1,
+            'Mobile connection and utility buttons must share a row with an 8px gap');
+        check(Math.abs(utility.right - actions.getBoundingClientRect().right) < 1,
+            'Mobile actions must fill the available width');
+    } else {
+        check(Math.abs(main.right - utility.right) < 1 && utility.top > main.bottom,
+            'Desktop connection and utility buttons must align at their right edge');
+    }
+};
 const refresh = () => document.querySelector('.btn-refresh');
 const updateEvent = 'resp_' + WsCommand.UPDATE_CONTROLLER_STATE;
 const listeners = event => window.mitty.all.get(event)?.length || 0;
@@ -39,6 +63,26 @@ try {
     reply(controllers);
     await settle();
     check(listeners(updateEvent) === 3, 'Each row must have one state listener');
+    check(refresh().querySelector('svg[aria-hidden="true"]') && refresh().getAttribute('aria-label') === 'Refresh controllers',
+        'Refresh icon must retain its accessible action name');
+    const rumbleRow = document.querySelector('[aria-label="Joy-Con left"]').closest('li');
+    const rumbleButton = rumbleRow.querySelector('.controller-rumble-button');
+    checkActionsLayout(rumbleRow);
+    check(rumbleButton.title === 'Rumble on', 'Idle controllers must show the rumble icon');
+    check(!rumbleButton.querySelector('path[stroke]'), 'Enabled rumble must use the unslashed icon');
+    rumbleButton.click();
+    check(sent.at(-1).cmd === WsCommand.TOGGLE_RUMBLE && sent.at(-1).data.enabled === false,
+        'Idle controllers must be able to toggle rumble');
+    window.mitty.emit(updateEvent, {...controllers[0], rumble_enabled:false});
+    await settle();
+    check(rumbleButton.getAttribute('aria-pressed') === 'false' && rumbleButton.title === 'Rumble off',
+        'Rumble icon must reflect the server state');
+    check(rumbleButton.querySelector('path[stroke]'), 'Disabled rumble must show a diagonal slash');
+    window.mitty.emit(updateEvent, {...controllers[0], rumble_enabled:true});
+    await settle();
+    check(!rumbleButton.querySelector('path[stroke]'), 'Re-enabling rumble must remove the slash');
+    reply(controllers);
+    await settle();
     for (const player_color of [undefined, null, []]) {
         const jd23Controllers = controllers.map(controller => controller.serial === 'left' ? {
             ...controller, state:4, player_name:'JD26 player', player_id:2, player_color,
@@ -60,14 +104,23 @@ try {
     check(icons[2].getBoundingClientRect().width === 48 && icons[2].getBoundingClientRect().height === 36, 'Pro icon size changed');
 
     const requests = sent.length;
+    const refreshPath = refresh().querySelector('path').getAttribute('d');
     refresh().click();
     await settle();
     check(refresh().disabled && refresh().getAttribute('aria-busy') === 'true', 'Refresh must be disabled while pending');
+    check(refresh().querySelector('path').getAttribute('d') !== refreshPath,
+        'Pending refresh must show the loading icon');
+    check(getComputedStyle(refresh().querySelector('svg')).animationName ===
+        (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'none' : 'icon-spin'),
+        'Refresh must animate unless reduced motion is requested');
     refresh().click();
     check(sent.length === requests + 1, 'Disabled Refresh must not send another request');
     reply(controllers);
     await settle();
     check(!refresh().disabled, 'An unchanged controller list must finish refresh');
+    check(refresh().querySelector('path').getAttribute('d') === refreshPath &&
+        getComputedStyle(refresh().querySelector('svg')).animationName === 'none',
+        'Finishing refresh must restore the idle icon and stop the animation');
 
     const proRow = document.querySelector('.controller-pro').closest('li');
     const connectedControllers = controllers.map(controller => controller.serial === 'pro' ? {
@@ -79,7 +132,8 @@ try {
     await settle();
     check(document.querySelector('.controller-pro').closest('li') === proRow, 'Refresh must reuse the existing controller row');
     check(proRow.querySelector('.controller-state').textContent === 'Connected!', 'Fresh lists must update existing row status');
-    check(proRow.querySelector('.button-group').textContent.includes('Rumble On'), 'Fresh lists must update action buttons');
+    checkActionsLayout(proRow);
+    check(proRow.querySelector('.controller-rumble-button').getAttribute('aria-pressed') === 'true', 'Fresh lists must update action buttons');
     check(proRow.querySelector('svg path').getAttribute('fill') === '#83ceb5' && proRow.querySelector('.battery-level').classList.contains('critical'), 'Fresh lists must update colors and battery');
     check(proRow.querySelector('.player-info').textContent.includes('Test player'), 'Fresh lists must update player details');
     check(proRow.querySelector('.player-color'), 'Legacy player colors must still render');
@@ -120,7 +174,7 @@ try {
     window.mitty.emit(updateEvent, {...controllers[2],state:4,rumble_enabled:true,color:'#83ceb5'});
     await settle();
     check(document.querySelector('.controller-pro path').getAttribute('fill') === '#83ceb5', 'Extracted icon must receive updated colors');
-    document.querySelector('.button-group button:last-child').click();
+    proRow.querySelector('.controller-rumble-button').click();
     check(sent.at(-1).cmd === WsCommand.TOGGLE_RUMBLE && sent.at(-1).data.enabled === false, 'Row actions must still work');
 
     refresh().click();
@@ -129,6 +183,8 @@ try {
     window.mitty.emit('ws_disconnected');
     await settle();
     check(!refresh().disabled, 'Disconnection must finish refresh');
+    check(getComputedStyle(refresh().querySelector('svg')).animationName === 'none',
+        'Disconnection must stop the refresh animation');
     const beforeOffline = sent.length;
     refresh().click();
     await settle();

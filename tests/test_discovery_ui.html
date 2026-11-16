@@ -47,9 +47,10 @@ const change = async (selector, value) => {
     await settle();
 };
 const click = async element => { element.click(); await settle(); };
-const button = text => [...document.querySelectorAll('button')].find(element => element.textContent.trim() === text);
+const button = text => [...document.querySelectorAll('button')].find(element => (element.getAttribute('aria-label') || element.textContent).trim() === text);
+const submit = () => document.querySelector('.connection-editor button[type="submit"]');
 const row = name => [...document.querySelectorAll('.connections-list li')].find(element => element.querySelector('strong').textContent === name);
-const action = (name, text) => [...row(name).querySelectorAll('button')].find(element => element.textContent === text);
+const action = (name, text) => [...row(name).querySelectorAll('button')].find(element => element.getAttribute('aria-label') === `${text} ${name}`);
 const connect = async () => { window.mitty.emit('req_connect_controller', 'test'); await settle(); return sent.at(-1)?.data; };
 const reply = async (data, ok = true) => { scans.at(-1)({ok,json:async () => data}); await settle(); };
 const consoles = [
@@ -61,19 +62,44 @@ const consoles = [
 try {
     await import('/js/app.js'); await settle();
     check(scans.length === 0, 'Discovery must remain opt-in');
+    check([...document.querySelectorAll('.connections .icon-button')].every(element =>
+        element.getAttribute('aria-label') && element.title && element.querySelector('svg[aria-hidden="true"]')),
+        'Connection action icons must have tooltips and accessible names');
     check(row('Previous connection').querySelector('input').checked, 'The previous configuration must be selected');
     check((await connect()).pairing_code === '123456', 'Saved selection must reach the connection request');
+    const addButton = button('Add connection');
+    addButton.focus();
     await click(button('Add connection'));
+    check(document.querySelector('.connection-dialog').matches(':modal'), 'The connection editor must open as a modal popup');
     check(document.activeElement.id === 'connectionName', 'Adding a connection must focus its name field');
+    const popup = document.querySelector('.connection-dialog');
+    const closeEditor = popup.querySelector('[aria-label="Close connection editor"]');
+    check(closeEditor.querySelector('svg[aria-hidden="true"]') && closeEditor.title === 'Close',
+        'Connection close icon must retain its tooltip and accessible action name');
+    const saveButton = submit();
+    check(saveButton.textContent === 'Add connection', 'New connections must use the Add connection action');
+    check(Math.abs(saveButton.getBoundingClientRect().right - popup.querySelector('form').getBoundingClientRect().right) < 1,
+        'Save changes must be aligned to the right of the popup');
+    popup.dispatchEvent(new Event('cancel', {cancelable:true}));
+    await settle();
+    check(!document.querySelector('.connection-dialog') && document.activeElement === addButton,
+        'Escape must discard the draft and restore focus to the button that opened the popup');
+    await click(button('Add connection'));
     await change('#connectionName', 'Living room');
     await change('#stacked-state', 'old');
     await change('#ipAddr', '192.168.1.8');
     check(document.querySelector('#pairingCode').readOnly, 'Legacy entries must not require a code');
     delaySave = true;
-    await click(button('Save connection'));
+    await click(submit());
     check(button('Add connection').disabled && action('Previous connection', 'Edit').disabled && action('Previous connection', 'Delete').disabled,
         'Editor-changing actions must be disabled while a save is pending');
     check(row('Previous connection').querySelector('input').disabled, 'Pending saves must not allow changing selection');
+    const savingPopup = document.querySelector('.connection-dialog');
+    check(savingPopup.querySelector('[aria-label="Close connection editor"]').disabled,
+        'The close icon must be disabled while saving');
+    savingPopup.dispatchEvent(new Event('cancel', {cancelable:true}));
+    await settle();
+    check(savingPopup.open, 'Escape must preserve the popup while a save is pending');
     await click(button('Add connection'));
     await click(action('Previous connection', 'Edit'));
     await click(action('Previous connection', 'Delete'));
@@ -83,21 +109,35 @@ try {
     releaseSave();
     await settle();
     check(!document.querySelector('.connection-editor') && row('Living room'), 'Adding must save and close the editor');
+    check(document.activeElement === addButton, 'Saving must restore focus to the button that opened the popup');
     check(!button('Add connection').disabled && !action('Living room', 'Edit').disabled,
         'Editor actions must be restored after a save');
     check((await connect()).console_ip_addr === '192.168.1.8', 'The added entry must be selected');
     await click(action('Living room', 'Edit'));
+    check(document.querySelector('.connection-dialog').matches(':modal') && document.querySelector('#connection-editor-title').textContent === 'Edit connection',
+        'Editing a saved connection must open the same popup with the correct title');
+    check(submit().textContent === 'Save changes', 'Existing connections must use the Save changes action');
     await change('#ipAddr', '192.168.1.9');
-    await click(button('Cancel'));
+    await click(button('Close connection editor'));
     check((await connect()).console_ip_addr === '192.168.1.8', 'Canceling edits must preserve the selected settings');
     await click(action('Living room', 'Edit'));
     await change('#connectionName', 'Game PC');
-    await click(button('Save connection'));
+    await click(submit());
     check(saved.length === 2 && row('Game PC'), 'Editing must update the existing saved entry');
+    const scanPath = button('Scan network').querySelector('path').getAttribute('d');
     await click(button('Scan network'));
     check(button('Scanning…').disabled, 'Scanning must show progress');
+    check(button('Scanning…').getAttribute('aria-busy') === 'true' &&
+        button('Scanning…').querySelector('path').getAttribute('d') !== scanPath,
+        'Pending discovery must show an accessible loading icon');
+    check(getComputedStyle(button('Scanning…').querySelector('svg')).animationName ===
+        (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'none' : 'icon-spin'),
+        'Discovery must animate unless reduced motion is requested');
     check((await connect()).console_ip_addr === '192.168.1.8', 'Scanning must not block using a saved connection');
     await reply({consoles});
+    check(button('Scan network').querySelector('path').getAttribute('d') === scanPath &&
+        getComputedStyle(button('Scan network').querySelector('svg')).animationName === 'none',
+        'Completed discovery must restore the idle icon and stop the animation');
     check(document.querySelectorAll('.connections-list li').length === 4, 'Saved and local entries must share one deduplicated list');
     check(row('Previous connection').textContent.includes('Saved · Local'), 'A matching discovery must mark the saved entry as local');
     await click(row('Just Dance').querySelector('input'));
@@ -105,14 +145,14 @@ try {
     await click(action('Just Dance', 'Save'));
     await change('#connectionName', 'JDMO 2021');
     await change('#stacked-state', 'jdmo');
-    await click(button('Save connection'));
+    await click(submit());
     check((await connect()).pairing_method === 'jdmo', 'Saving a local code must allow choosing the JDMO service');
     check(document.querySelectorAll('.connections-list li').length === 4, 'Saving a discovery must not duplicate it');
     await click(row('Legacy on LAN').querySelector('input'));
     check((await connect()).console_url.includes(':9000/game/smartphone'), 'Local selection must preserve custom ports and paths');
     await click(action('Legacy on LAN', 'Save'));
     await change('#connectionName', 'Local legacy game');
-    await click(button('Save connection'));
+    await click(submit());
     check(writes.at(-1).console_url.includes(':9000/game/smartphone'), 'Saving a discovery must preserve its custom URL');
     const savedLegacy = saved.find(item => item.name === 'Local legacy game');
     const alias = {...savedLegacy, console_ip_addr:'127.0.0.1', console_url:'ws://127.0.0.1:9000/game/smartphone?token=123'};
@@ -124,7 +164,7 @@ try {
     check((await connect()).console_ip_addr === '127.0.0.1', 'Alias matching must preserve the saved connection address');
     await click(action('Local legacy game', 'Edit'));
     await change('#ipAddr', '192.168.1.7');
-    await click(button('Save connection'));
+    await click(submit());
     check(!('console_url' in await connect()), 'Changing the console address must clear the discovered URL');
     await click(action('Local legacy game', 'Delete'));
     check(confirmations.at(-1).includes('Local legacy game'), 'Delete confirmation must identify the saved connection');
@@ -145,15 +185,18 @@ try {
     await click(button('Add connection'));
     await change('#connectionName', 'Unsaved entry');
     failSave = true;
-    await click(button('Save connection'));
+    await click(submit());
     check(document.querySelector('#connectionName').value === 'Unsaved entry' && document.querySelector('[role=alert]').textContent.includes('Could not save') && !button('Add connection').disabled,
         'Save errors must preserve the draft and restore editor actions');
+    check(document.querySelector('.connection-dialog').matches(':modal'), 'Save errors must leave the popup open for correction');
     failSave = false;
-    await click(button('Cancel'));
+    await click(button('Close connection editor'));
     await click(button('Scan network')); await reply({consoles:[]});
     check(document.querySelector('.connections').textContent.includes('No local games found') && row('Previous connection'), 'An empty scan must preserve saved entries');
     await click(button('Scan network')); await reply({error:'Close other controller apps using port 7000.'}, false);
     check(document.querySelector('[role=alert]').textContent.includes('7000') && !button('Scan network').disabled, 'Failed scans must allow retrying');
+    check(getComputedStyle(button('Scan network').querySelector('svg')).animationName === 'none',
+        'Failed discovery must stop the loading animation');
     await click(button('Scan network')); await reply({consoles});
     await click(row('Previous connection').querySelector('input'));
     window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_get_controller_list',data:[{

@@ -2,6 +2,7 @@ import { Component } from '/js/preact.module.js';
 import { html } from '/js/utils.js';
 import { WsCommand } from '/js/consts.js';
 import ControllerIcon from '/js/components/ControllerIcon.js';
+import ActionIcon from '/js/components/ActionIcon.js';
 
 const SVG_BATTERY_LEVEL = html`<svg style="enable-background:new 0 0 16 16" viewBox="0 0 16 16" xml:space="preserve" xmlns="http://www.w3.org/2000/svg"><path d="M15 4H0v8h15V9h1V7h-1V4zm-1 3v4H1V5h13v2z"/><rect class="battery-bar-4" height="4" width="2" x="11" y="6"/><rect class="battery-bar-3" height="4" width="2" x="8" y="6"/><rect class="battery-bar-2" height="4" width="2" x="5" y="6"/><rect class="battery-bar-1" height="4" width="2" x="2" y="6"/></svg>`
 
@@ -193,13 +194,10 @@ class Controller extends Component {
                             <span class="pairing-code">${pairing_code}</span>
                         `}
                     </div>
-                    <div class="pure-u-6-24">
+                    <div class="controller-actions">
                         ${controllerState == PairingState.CONNECTED && html`
                             <div class="button-group">
                                 <button type="button" onClick=${this.disconnect} class="pure-button pure-button-error">Disconnect</button>
-                                <button type="button" onClick=${this.toggleRumble} class="pure-button ${rumble_enabled ? 'pure-button-primary' : 'pure-button-secondary'}">
-                                    Rumble ${rumble_enabled ? 'On' : 'Off'}
-                                </button>
                             </div>
                         `}
                         ${connection_requested && controllerState != PairingState.CONNECTED && html`
@@ -208,6 +206,13 @@ class Controller extends Component {
                         ${!connection_requested && controllerState != PairingState.CONNECTED && html`
                             <button type="button" onClick=${this.connect} disabled=${signingIn} class="pure-button pure-button-primary">Connect</button>
                         `}
+                        <div class="controller-utility-actions">
+                            <button type="button" onClick=${this.toggleRumble}
+                                class="pure-button icon-button controller-rumble-button ${rumble_enabled ? 'pure-button-primary' : 'pure-button-secondary'}"
+                                aria-label=${`${name} rumble`} aria-pressed=${Boolean(rumble_enabled)} title=${rumble_enabled ? 'Rumble on' : 'Rumble off'}>
+                                <${ActionIcon} name=${rumble_enabled ? 'rumble' : 'rumble-off'} />
+                            </button>
+                        </div>
                     </div>
                 </div>
                 ${props.jdnow && !connection_requested && controllerState !== PairingState.CONNECTED && html`
@@ -361,7 +366,10 @@ export class Controllers extends Component {
         return html`
             <div class="pure-g">
                 <h2 class="pure-u-18-24">Controllers</h2>
-                <button type="button" disabled=${state.isRefreshing} aria-busy=${state.isRefreshing} class="pure-button btn-refresh pure-u-6-24" onClick=${this.refreshControllerList}>Refresh</button>
+                <button type="button" disabled=${state.isRefreshing} aria-busy=${state.isRefreshing}
+                    class="pure-button icon-button btn-refresh" aria-label="Refresh controllers"
+                    title=${state.isRefreshing ? 'Refreshing controllers…' : 'Refresh controllers'}
+                    onClick=${this.refreshControllerList}><${ActionIcon} name=${state.isRefreshing ? 'loading' : 'refresh'} /></button>
             </div>
             <div class="controllers-wrapper">
                 ${props.controllers.length == 0 && html`

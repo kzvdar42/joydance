@@ -150,6 +150,7 @@ class JoyConWrapper(AbstractControllerWrapper):
 
     def set_rumble(self, rumble_enabled):
         self.rumble_enabled = rumble_enabled
+        self._state["rumble_enabled"] = rumble_enabled
         # Assuming the actual joycon object has its own rumble_enabled state or method
         if hasattr(self.joycon, "rumble_enabled"):
             self.joycon.rumble_enabled = rumble_enabled
