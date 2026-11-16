@@ -25,7 +25,8 @@ const controllers = [
     {serial:'left',name:'JoyCon L',controller_type:'joycon_left',color:'#19bee4'},
     {serial:'right',name:'JoyCon R',controller_type:'joycon_right',color:'#ef483e'},
     {serial:'pro',name:'Pro Controller',controller_type:'pro_controller',color:'#383638',color_buttons:'#222'},
-].map(controller=>({...controller,state:0,battery_level:4,rumble_enabled:true}));
+].map(controller=>({...controller,state:0,battery_level:4,rumble_enabled:true,
+    motion_settings:{idle_imu_shutdown:true,gyro_shutdown:false},gyro_shutdown_available:false}));
 const settle = () => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 const check = (condition, message) => { if (!condition) throw new Error(message); };
 const checkActionsLayout = row => {
@@ -48,8 +49,8 @@ const checkActionsLayout = row => {
         check(Math.abs(utility.right - actions.getBoundingClientRect().right) < 1,
             'Mobile actions must fill the available width');
     } else {
-        check(Math.abs(main.right - utility.right) < 1 && utility.top > main.bottom,
-            'Desktop connection and utility buttons must align at their right edge');
+        check(Math.abs(main.width - utility.width) < 1 && utility.top > main.bottom,
+            'Desktop connection button must match the combined utility button width');
     }
 };
 const refresh = () => document.querySelector('.btn-refresh');
@@ -65,10 +66,13 @@ try {
     check(listeners(updateEvent) === 3, 'Each row must have one state listener');
     check(refresh().querySelector('svg[aria-hidden="true"]') && refresh().getAttribute('aria-label') === 'Refresh controllers',
         'Refresh icon must retain its accessible action name');
-    const rumbleRow = document.querySelector('[aria-label="Joy-Con left"]').closest('li');
-    const rumbleButton = rumbleRow.querySelector('.controller-rumble-button');
-    checkActionsLayout(rumbleRow);
-    check(rumbleButton.title === 'Rumble on', 'Idle controllers must show the rumble icon');
+    const settingsRow = document.querySelector('[aria-label="Joy-Con left"]').closest('li');
+    const settingsPanel = settingsRow.querySelector('.controller-settings');
+    const settingsButton = settingsRow.querySelector('.controller-settings-button');
+    const rumbleButton = settingsRow.querySelector('.controller-rumble-button');
+    checkActionsLayout(settingsRow);
+    check(rumbleButton.nextElementSibling === settingsButton && rumbleButton.title === 'Rumble on',
+        'Idle controllers must show the rumble icon immediately before Settings');
     check(!rumbleButton.querySelector('path[stroke]'), 'Enabled rumble must use the unslashed icon');
     rumbleButton.click();
     check(sent.at(-1).cmd === WsCommand.TOGGLE_RUMBLE && sent.at(-1).data.enabled === false,
@@ -81,6 +85,49 @@ try {
     window.mitty.emit(updateEvent, {...controllers[0], rumble_enabled:true});
     await settle();
     check(!rumbleButton.querySelector('path[stroke]'), 'Re-enabling rumble must remove the slash');
+    check(settingsButton.querySelector('svg[aria-hidden="true"]') && settingsButton.title === 'Settings'
+        && settingsButton.getAttribute('aria-label') === 'JoyCon L settings',
+        'Settings icon must retain a tooltip and an accessible action name');
+    check(!settingsPanel.open, 'Settings popup must start closed');
+    const closeSettings = settingsPanel.querySelector('.controller-settings-heading button');
+    check(closeSettings.querySelector('svg[aria-hidden="true"]') && closeSettings.title === 'Close'
+        && closeSettings.getAttribute('aria-label') === 'Close JoyCon L settings',
+        'Settings close icon must retain a tooltip and an accessible action name');
+    settingsButton.focus();
+    settingsButton.click();
+    check(settingsPanel.open && settingsPanel.matches(':modal'), 'Settings button must open a modal popup');
+    check(settingsPanel.contains(document.activeElement), 'Opening settings must move keyboard focus into the popup');
+    check(settingsPanel.querySelector('[name="idle_imu_shutdown"]').checked, 'Idle IMU shutdown must default to on');
+    const gyro = settingsPanel.querySelector('[name="gyro_shutdown"]');
+    check(!gyro.checked, 'Gyro shutdown must default to off');
+    check(gyro.getBoundingClientRect().width < 30, 'Checkboxes must retain their normal width beside the labels');
+    gyro.click();
+    await settle();
+    settingsPanel.querySelector('form').requestSubmit();
+    await settle();
+    check(sent.at(-1).cmd === WsCommand.SAVE_CONTROLLER_SETTINGS && sent.at(-1).data.settings.gyro_shutdown,
+        'Settings form must send the selected controller and checkbox values');
+    window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_save_controller_settings',
+        data:{controller_serial:'left',error:'Test save error'}})});
+    await settle();
+    check(settingsPanel.textContent.includes('Test save error'), 'Save errors must appear beside controller settings');
+    window.mitty.emit(updateEvent, {...controllers[0],state:4,connection_requested:true});
+    await settle();
+    check(!settingsPanel.querySelector('fieldset').disabled, 'Settings must remain available during a game connection');
+    settingsPanel.querySelector('form').requestSubmit();
+    await settle();
+    check(settingsPanel.querySelector('fieldset').disabled, 'Saving must prevent duplicate requests');
+    check(sent.at(-1).cmd === WsCommand.SAVE_CONTROLLER_SETTINGS,
+        'A connected controller must be able to save settings');
+    window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_save_controller_settings', data:{controller_serial:'left'}})});
+    await settle();
+    settingsPanel.querySelector('.controller-settings-heading button').click();
+    check(!settingsPanel.open && document.activeElement === settingsButton,
+        'Closing settings must restore focus to the popup button');
+    settingsButton.click();
+    const escape = new Event('cancel', {cancelable:true});
+    if (settingsPanel.dispatchEvent(escape)) settingsPanel.close();
+    check(!settingsPanel.open, 'Settings must allow the native Escape action');
     reply(controllers);
     await settle();
     for (const player_color of [undefined, null, []]) {
@@ -234,7 +281,8 @@ try {
     render(html`<${Controllers} controllers=${controllers} />`, document.body);
     const beforeUnmount = listeners('ws_disconnected');
     render(null, document.body);
-    check(listeners(updateEvent) === 0 && listeners('ws_disconnected') === beforeUnmount - 1, 'Unmount must release row and refresh listeners');
+    check(listeners(updateEvent) === 0 && listeners('ws_disconnected') === beforeUnmount - controllers.length - 1,
+        'Unmount must release row settings and refresh listeners');
     render(html`<div class="container controllers"><${Controllers} controllers=${controllers} /></div><p style="text-align:center">All UI regression checks passed.</p>`, document.body);
     await settle();
     document.body.dataset.testResult = 'passed';

@@ -52,6 +52,54 @@ class BrowserUpdateTests(unittest.IsolatedAsyncioTestCase):
         await toggle(True)
         self.assertTrue((await game.get_state(False))["rumble_enabled"])
 
+    async def test_motion_settings_apply_during_gameplay_and_broadcast_to_browsers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = ConfigHandler(str(Path(directory) / "config.cfg"))
+            settings = {"idle_imu_shutdown": False, "gyro_shutdown": True}
+            controller = SimpleNamespace(apply_motion_settings=AsyncMock(),
+                                         get_state=AsyncMock(return_value={"motion_settings": settings}))
+            game = SimpleNamespace(is_connected=True, get_state=AsyncMock(return_value={"motion_settings": settings}))
+            app = web.Application()
+            app.update({"controllers": {"left": controller}, "config_handler": config,
+                        "controllers_info": {"left": {"serial": "left", "state": 0}},
+                        "websockets": set(), "joydance_connections": {"left": game},
+                        "joydance_connection_locks": defaultdict(asyncio.Lock)})
+            app.router.add_get("/ws", dance.websocket_handler)
+            client = TestClient(TestServer(app))
+            await client.start_server()
+            self.addAsyncCleanup(client.close)
+            first, second = await client.ws_connect("/ws"), await client.ws_connect("/ws")
+            await first.send_json({"cmd": "save_controller_settings", "data": {
+                "controller_serial": "left", "settings": settings,
+            }})
+            for browser in (first, second):
+                response = await browser.receive_json(timeout=1)
+                self.assertEqual(response["cmd"], "resp_update_controller_state")
+                self.assertEqual(response["data"]["motion_settings"], settings)
+            self.assertEqual(await first.receive_json(timeout=1), {
+                "cmd": "resp_save_controller_settings", "data": {"controller_serial": "left"},
+            })
+            controller.apply_motion_settings.assert_awaited_once_with(**settings)
+            game.get_state.assert_awaited_once()
+            self.assertEqual(ConfigHandler(config.current_cfg_path).get_controller_settings("left"), settings)
+
+            await first.send_json({"cmd": "save_controller_settings", "data": {
+                "controller_serial": "left", "settings": {**settings, "gyro_shutdown": "false"},
+            }})
+            response = await first.receive_json(timeout=1)
+            self.assertEqual(response["data"]["controller_serial"], "left")
+            self.assertIn("error", response["data"])
+            self.assertEqual(controller.apply_motion_settings.await_count, 1)
+
+            controller.apply_motion_settings.side_effect = RuntimeError("Controller setting failed")
+            with self.assertLogs("dance", level="ERROR"):
+                await first.send_json({"cmd": "save_controller_settings", "data": {
+                    "controller_serial": "left", "settings": settings,
+                }})
+                response = await first.receive_json(timeout=1)
+            self.assertEqual(response["data"]["controller_serial"], "left")
+            self.assertIn("error", response["data"])
+
     async def test_jdnow_sign_in_only_imports_and_broadcasts_from_the_local_ui(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

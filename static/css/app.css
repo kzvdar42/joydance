@@ -269,6 +269,7 @@ body {
     gap: 8px;
 }
 
+.controller-settings,
 .connection-dialog {
     box-sizing: border-box;
     width: calc(100% - 2rem);
@@ -283,10 +284,12 @@ body {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
+.controller-settings::backdrop,
 .connection-dialog::backdrop {
     background: rgba(0, 0, 0, 0.6);
 }
 
+.controller-settings-heading,
 .connection-dialog-heading {
     display: flex;
     justify-content: space-between;
@@ -295,12 +298,86 @@ body {
     margin-bottom: 8px;
 }
 
+.controller-settings-heading h3,
 .connection-dialog-heading h3 {
     margin: 0;
 }
 
+.controller-settings-heading .icon-button,
 .connection-dialog-heading .icon-button {
     flex-shrink: 0;
+}
+
+.controller-settings .pure-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0 0 12px;
+    padding: 16px;
+    border: 1px solid #45454c;
+    border-radius: 8px;
+    background: #222225;
+    cursor: pointer;
+}
+
+.controller-setting-title {
+    display: block;
+    font-weight: 600;
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+.controller-setting-description {
+    display: block;
+    margin-top: 5px;
+    color: #b8b8bf;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.controller-setting-alpha {
+    margin-left: 2px;
+    font-size: 0.75em;
+    font-weight: 400;
+    line-height: 0;
+    vertical-align: super;
+}
+
+.controller-settings input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+    accent-color: #2196f3;
+}
+
+.controller-settings input[type="checkbox"]:focus-visible {
+    outline: 2px solid #90caf9;
+    outline-offset: 3px;
+}
+
+.controller-settings-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #45454c;
+}
+
+.controller-settings .controller-settings-actions .pure-button {
+    width: auto;
+    padding: 6px 16px;
+    height: auto;
+    min-height: 36px;
+}
+
+.controller-settings .controller-field-status {
+    margin: 12px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
 }
 
 .pure-form fieldset {

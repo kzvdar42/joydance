@@ -34,6 +34,11 @@ class JoyConWrapper(AbstractControllerWrapper):
         }[product_id]
 
     async def get_state(self, pull_new_data=True):
+        self._state["motion_settings"] = {
+            "idle_imu_shutdown": self.joycon._idle_imu_shutdown,
+            "gyro_shutdown": self.joycon._gyro_shutdown,
+        }
+        self._state["gyro_shutdown_available"] = self.joycon._gyro_shutdown_supported
         if pull_new_data or "battery_level" not in self._state:
             self._state["battery_level"] = await self.battery_level()
         if "color" not in self._state and self.joycon.was_state_initialized:
@@ -113,6 +118,23 @@ class JoyConWrapper(AbstractControllerWrapper):
 
     def set_accel_collection(self, enabled):
         self.joycon.set_accel_collection(enabled)
+
+    def configure_motion(self, *, idle_imu_shutdown, gyro_shutdown):
+        self.joycon._idle_imu_shutdown = idle_imu_shutdown
+        self.joycon._gyro_shutdown = gyro_shutdown
+
+    async def apply_motion_settings(self, **settings):
+        self.configure_motion(**settings)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 2
+        while self.is_connected():
+            needs_motion = self.joycon._accel_reports is not None or not self.joycon._idle_imu_shutdown
+            if (self.joycon._gyro_shutdown_checked == self.joycon._gyro_shutdown
+                    and self.joycon._imu_enabled == needs_motion):
+                return
+            if loop.time() >= deadline:
+                raise OSError("Settings saved. The controller has not applied them yet.")
+            await asyncio.sleep(0.01)
 
     def get_accel_events(self):
         try:

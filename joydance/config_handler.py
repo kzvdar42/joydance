@@ -29,6 +29,7 @@ class ConfigHandler:
         "console_ip_addr": "",
         "pairing_code": "",
     }
+    DEFAULT_CONTROLLER_SETTINGS = {"idle_imu_shutdown": True, "gyro_shutdown": False}
 
     def __init__(self, cfg_paths: list[str] | str):
         if isinstance(cfg_paths, str):
@@ -107,6 +108,26 @@ class ConfigHandler:
         if not isinstance(players, dict):
             raise ValueError("Invalid saved Just Dance Now profiles.")
         return players
+
+    def get_controller_settings(self, serial):
+        settings = json.loads(self._parser.get("controllers", serial, fallback="{}"))
+        if (not isinstance(settings, dict) or settings.keys() - self.DEFAULT_CONTROLLER_SETTINGS.keys()
+                or any(type(value) is not bool for value in settings.values())):
+            raise ValueError("Invalid saved controller settings.")
+        return {**self.DEFAULT_CONTROLLER_SETTINGS, **settings}
+
+    def save_controller_settings(self, serial, settings):
+        if (not isinstance(settings, dict) or settings.keys() != self.DEFAULT_CONTROLLER_SETTINGS.keys()
+                or any(type(value) is not bool for value in settings.values())):
+            raise ValueError("Invalid controller settings.")
+        previous = dict(self._parser["controllers"]) if "controllers" in self._parser else None
+        self._parser["controllers"] = {**(previous or {}), serial: json.dumps(settings)}
+        if not self.save_data():
+            if previous is None:
+                self._parser.remove_section("controllers")
+            else:
+                self._parser["controllers"] = previous
+            raise OSError("Could not save controller settings.")
 
     @staticmethod
     def _jdnow_player_record(players, serial):

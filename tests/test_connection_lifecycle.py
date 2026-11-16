@@ -530,6 +530,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 joycon._first_connection_timeout = 0
                 joycon._max_setup_attempts = 2
                 joycon.reconnect_timeout = 0
+                joycon.set_accel_collection(True)
                 full_report = b"\x30" + bytes(48)
 
                 def write(report):
@@ -551,6 +552,9 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(
                             [call.args[0][10] for call in failed_device.write.call_args_list],
                             [0x08, 0x03, 0x40, 0x41],
+                        )
+                        self.assertEqual(
+                            device.write.call_args_list[3].args[0][10:15], b"\x41\x03\x00\x01\x01"
                         )
                         self.assertTrue(joycon.was_state_initialized)
                     finally:
@@ -685,6 +689,7 @@ class JoyConReportTests(unittest.TestCase):
         self.addCleanup(joycon.close)
         joycon._should_run.set()
         joycon.set_accel_collection(True)
+        joycon._imu_enabled = joycon._imu_ready = True
         hook = Mock()
         joycon.register_update_hook(hook)
         original = joycon._input_report
@@ -765,6 +770,7 @@ class JoyConReportTests(unittest.TestCase):
                 joycon._should_run.set()
                 joycon._input_reader_gate.set()
                 joycon.set_accel_collection(True)
+                joycon._imu_enabled = joycon._imu_ready = True
                 clock = 0
 
                 def read(**kwargs):
@@ -882,13 +888,13 @@ class JoyConReportTests(unittest.TestCase):
 
     def test_sensor_setup_explicitly_restores_settings_on_every_call(self):
         # Wire values from bluetooth_hid_subcommands_notes.md, commands 0x40/0x41/0x48/0x03/0x30.
-        expected = [
-            b"\x40\x01\x00\x00\x00",
-            b"\x41\x03\x00\x01\x01",
+        common_settings = [
             b"\x48\x01\x00\x00\x00",
             b"\x03\x30\x00\x00\x00",
             b"\x30\x08\x00\x00\x00",
         ]
+        idle_settings = [b"\x40\x00\x00\x00\x00"] + common_settings
+        scoring_settings = [b"\x40\x01\x00\x00\x00", b"\x41\x03\x00\x01\x01"] + common_settings
         for product_id in (JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID):
             for rumble_enabled in (False, True):
                 with self.subTest(product_id=product_id, rumble_enabled=rumble_enabled):
@@ -900,14 +906,52 @@ class JoyConReportTests(unittest.TestCase):
                     joycon._joycon_device = device
                     with patch("joydance.controllers.joycon.pycon.joycon.time.sleep"):
                         joycon._setup_sensors()
+                        joycon.set_accel_collection(True)
+                        joycon._setup_sensors()
                         joycon._setup_sensors()
                     reports = [call.args[0] for call in device.write.call_args_list]
-                    self.assertEqual([report[10:15] for report in reports], expected * 2)
+                    self.assertEqual([report[10:15] for report in reports], idle_settings + scoring_settings * 2)
                     self.assertTrue(all(report[0] == 1 and len(report) == 49 for report in reports))
                     self.assertEqual(joycon.rumble_enabled, rumble_enabled)
                     if not rumble_enabled:
                         joycon.rumble(320, 0.5)
                         self.assertEqual(device.write.call_count, len(reports))
+
+    def test_gyro_shutdown_requires_opt_in_and_verified_imu(self):
+        identity_read = b"\x43\x0f\x01\x00"
+        gyro_shutdown = b"\x42\x11\x01\x0c"
+        for product_id, opt_in, chip_id, expected in (
+            (JOYCON_L_PRODUCT_ID, False, 0x69, []),
+            (JOYCON_L_PRODUCT_ID, True, 0x69, [identity_read, gyro_shutdown]),
+            (JOYCON_L_PRODUCT_ID, True, 0x00, [identity_read]),
+            (JOYCON_R_PRODUCT_ID, True, 0x69, [identity_read, gyro_shutdown]),
+            (JOYCON_PRO_PRODUCT_ID, True, 0x69, [identity_read, gyro_shutdown]),
+            (JOYCON_PRO_PRODUCT_ID, True, None, [identity_read]),
+        ):
+            with self.subTest(product_id=product_id, opt_in=opt_in, chip_id=chip_id):
+                joycon = JoyCon(
+                    JOYCON_VENDOR_ID, product_id, "test-controller", gyro_shutdown=opt_in,
+                )
+                self.addCleanup(joycon.close)
+                joycon._first_connection_timeout = 0
+                joycon.set_accel_collection(True)
+                full_report = b"\x30" + bytes(48)
+                device = Mock(read=Mock(return_value=full_report), write=Mock(side_effect=len))
+                if chip_id is None:
+                    joycon._subcommand_resend_interval = 0.01
+                else:
+                    identity_reply = b"\x21" + bytes(12) + b"\xc0\x43\x0f\x01" + bytes([chip_id]) + bytes(31)
+                    device.read.side_effect = [full_report, identity_reply]
+                generation, cancel, _ = joycon._begin_connection_attempt(0, allow_reopen=True)
+                with (
+                    patch.object(joycon, "_open", return_value=device),
+                    patch.object(joycon, "_read_joycon_data"),
+                    patch("joydance.controllers.joycon.pycon.joycon.time.sleep"),
+                ):
+                    joycon._connect_hid(generation, cancel)
+
+                commands = [request.args[0][10:14] for request in device.write.call_args_list]
+                self.assertEqual([command for command in commands if command[0] in (0x42, 0x43)], expected)
 
     def test_valid_reply_does_not_trigger_resend(self):
         joycon = JoyCon(JOYCON_VENDOR_ID, JOYCON_L_PRODUCT_ID, "test-controller")

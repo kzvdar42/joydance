@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, call, patch
 
 from joydance.constants import Command
-from joydance.controllers.base import PRODUCT_ID_TO_CONTROLLER_CLASS
+from joydance.controllers.base import PRODUCT_ID_TO_CONTROLLER_CLASS, update_controllers_list
 from joydance.controllers.joycon.joycon_wrapper import JoyConWrapper
 from joydance.controllers.joycon.pycon import ButtonEventJoyCon
 from joydance.controllers.joycon.pycon.constants import (
@@ -179,6 +179,27 @@ class ProControllerTests(unittest.TestCase):
 
 
 class ProControllerStateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_applies_saved_motion_settings_before_connecting(self):
+        settings = {"idle_imu_shutdown": False, "gyro_shutdown": True}
+
+        async def connect(controller):
+            self.assertFalse(controller.joycon._idle_imu_shutdown)
+            self.assertTrue(controller.joycon._gyro_shutdown)
+
+        controllers = {}
+        with (
+            patch("joydance.controllers.base.get_device_ids", new=AsyncMock(return_value=[{
+                "vendor_id": JOYCON_VENDOR_ID, "product_id": JOYCON_PRO_PRODUCT_ID, "serial": "settings-test",
+            }])),
+            patch.object(JoyConWrapper, "connect", new=connect),
+            patch.object(JoyConWrapper, "set_player_led", new=AsyncMock()),
+        ):
+            await update_controllers_list(controllers, get_controller_settings=lambda serial: settings)
+        controller = controllers["settings-test"]
+        self.addCleanup(controller.close)
+        controller.battery_level = AsyncMock(return_value=4)
+        self.assertEqual((await controller.get_state())["motion_settings"], settings)
+
     async def test_assignment_and_disconnect_flash_twice_and_leave_the_correct_pattern(self):
         for player_id, pattern in ((0, 8), (1, 1), (2, 3), (3, 7), (4, 15), (5, 9), (6, 5), (7, 13), (8, 6)):
             with self.subTest(player_id=player_id):

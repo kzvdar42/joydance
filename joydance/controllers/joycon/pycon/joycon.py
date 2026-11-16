@@ -33,7 +33,10 @@ class JoyCon:
     color_btn: Tuple[int, int, int]
     stick_cal: dict[str, list[int]]
 
-    def __init__(self, vendor_id: int, product_id: int, serial: str = None, simple_mode=False):
+    def __init__(
+        self, vendor_id: int, product_id: int, serial: str = None, simple_mode=False,
+        *, gyro_shutdown: bool = False,
+    ):
         if vendor_id != JOYCON_VENDOR_ID:
             raise ValueError(f'vendor_id is invalid: {vendor_id!r}')
 
@@ -68,6 +71,12 @@ class JoyCon:
         self._input_report = bytes(self._INPUT_REPORT_SIZE)
         self._input_report_deadline = None
         self._accel_reports = None
+        self._imu_enabled = False
+        self._imu_ready = False
+        self._idle_imu_shutdown = True
+        self._gyro_shutdown = gyro_shutdown
+        self._gyro_shutdown_checked = False
+        self._gyro_shutdown_supported = False
         self._packet_number = 0
         self.color_body = (128, 128, 128)
         self.color_btn = (255, 255, 255)
@@ -453,6 +462,12 @@ class JoyCon:
                 connection_generation,
                 connection_cancel,
             )
+            self._gyro_shutdown_supported = False
+            gyro_shutdown = self._gyro_shutdown
+            if gyro_shutdown:
+                self._gyro_shutdown_supported = self._has_lsm6ds3_imu()
+                self._ensure_connection_attempt_is_current(connection_generation, connection_cancel)
+            self._gyro_shutdown_checked = gyro_shutdown
             self._setup_sensors()
             self._ensure_connection_attempt_is_current(
                 connection_generation,
@@ -480,7 +495,11 @@ class JoyCon:
         with self._connection_lifecycle_lock:
             joycon_device = self._joycon_device
             self._joycon_device = None
-            self._accel_reports = None
+            if self._accel_reports is not None:
+                # Keep the game's scoring request across a HID reconnect.
+                self._accel_reports.clear()
+            self._imu_enabled = False
+            self._imu_ready = False
         if joycon_device:
             joycon_device.close()
 
@@ -563,6 +582,7 @@ class JoyCon:
                     if not self._joycon_device:
                         self._schedule_reconnect_from_reader()
                     else:
+                        self._apply_pending_motion_settings()
                         report = self._read_input_report()
                         if report is None:
                             raise OSError("joycon_device is None!")
@@ -613,8 +633,12 @@ class JoyCon:
                 return
             self._input_report = report
             self._input_report_deadline = time.monotonic() + self._input_report_timeout
-            if self._accel_reports is not None:
-                self._accel_reports.append(report)
+            if self._accel_reports is not None and self._imu_enabled:
+                if not self._imu_ready:
+                    # The first reports after wake can contain empty IMU samples.
+                    self._imu_ready = all(any(report[offset:offset + 6]) for offset in (13, 25, 37))
+                if self._imu_ready:
+                    self._accel_reports.append(report)
             self.is_connected.set()
             input_hooks = tuple(self._input_hooks)
 
@@ -683,8 +707,9 @@ class JoyCon:
         argument,
         timeout=None,
         response_validator=None,
+        *, publish_reports=False,
     ) -> Tuple[bool, bytes]:
-        # Setup owns HID reads while the background input reader is paused.
+        # Called by setup with the reader paused, or by the reader itself for live settings.
         if timeout is None:
             timeout = self._subcommand_response_timeout
 
@@ -699,6 +724,8 @@ class JoyCon:
         while True:
             self._ensure_active_connection_is_not_stopped()
             report = self._read_input_report()
+            if publish_reports and report:
+                self._publish_input_report(report)
             num_attempts += 1
             now = time.monotonic()
             if now >= deadline:
@@ -894,16 +921,51 @@ class JoyCon:
                 for side in ("left", "right")
             }
 
+    def _has_lsm6ds3_imu(self, *, publish_reports=False):
+        try:
+            ack, reply = self._send_subcmd_get_response(
+                b'\x43', b'\x0f\x01', timeout=self._subcommand_resend_interval,
+                publish_reports=publish_reports,
+            )
+        except (ControllerConnectionError, OSError):
+            raise
+        except Exception:
+            logger.debug("%s: IMU identification failed", self.serial, exc_info=True)
+            return False
+        return bool(ack and reply.startswith(b'\xc0\x43\x0f\x01\x69'))
+
+    def _apply_pending_motion_settings(self):
+        gyro_shutdown = self._gyro_shutdown
+        if gyro_shutdown != self._gyro_shutdown_checked:
+            supported = gyro_shutdown and self._has_lsm6ds3_imu(publish_reports=True)
+            if self._imu_enabled and (supported or self._gyro_shutdown_supported):
+                self._write_output_report(
+                    b'\x01', b'\x42', b'\x11\x01' + (b'\x0c' if supported else b'\x5c'),
+                )
+            self._gyro_shutdown_supported = supported
+            self._gyro_shutdown_checked = gyro_shutdown
+        needs_motion = self._accel_reports is not None or not self._idle_imu_shutdown
+        if needs_motion != self._imu_enabled:
+            self._set_imu_enabled(needs_motion)
+
+    def _set_imu_enabled(self, enabled):
+        self._write_output_report(b'\x01', b'\x40', bytes([enabled]))
+        if enabled:
+            time.sleep(0.02)
+            # Calibration assumes +/-8 g. Restore it after enabling the IMU.
+            # https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/bluetooth_hid_subcommands_notes.md#subcommand-0x41-set-imu-sensitivity
+            # +/-2000 dps, +/-8 g, 208 Hz gyro, 100 Hz accelerometer filter.
+            self._write_output_report(b'\x01', b'\x41', b'\x03\x00\x01\x01')
+            if self._gyro_shutdown_supported:
+                time.sleep(0.02)
+                # Clear the gyro data rate in CTRL2_G, preserving the ±2000 dps range bits.
+                self._write_output_report(b'\x01', b'\x42', b'\x11\x01\x0c')
+        self._imu_enabled = enabled
+        self._imu_ready = False
+
     def _setup_sensors(self):
         logger.debug("%s: _setup_sensors", self.serial)
-        # Enable 6 axis sensors
-        self._write_output_report(b'\x01', b'\x40', b'\x01')
-        # It needs delta time to update the setting
-        time.sleep(0.02)
-        # IMU enable only resets sensitivity if previously disabled; calibration requires +/-8 g.
-        # https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/bluetooth_hid_subcommands_notes.md#subcommand-0x41-set-imu-sensitivity
-        # +/-2000 dps, +/-8 g, 208 Hz gyro, 100 Hz accelerometer filter.
-        self._write_output_report(b'\x01', b'\x41', b'\x03\x00\x01\x01')
+        self._set_imu_enabled(self._accel_reports is not None or not self._idle_imu_shutdown)
         time.sleep(0.02)
         self._write_output_report(b'\x01', b'\x48', b'\x01')
         time.sleep(0.02)

@@ -32,6 +32,7 @@ export const WsCommand = {
     SHOW_SEARCH: 'show_search',
     HIDE_SEARCH: 'hide_search',
     TOGGLE_RUMBLE: 'toggle_rumble',
+    SAVE_CONTROLLER_SETTINGS: 'save_controller_settings',
 }
 
 export const WebSocketState = {

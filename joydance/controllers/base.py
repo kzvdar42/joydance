@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 import logging
 import hid
 
@@ -66,6 +67,7 @@ async def get_device_ids():
 
 async def update_controllers_list(
     controllers: dict[str, AbstractControllerWrapper] = {},
+    *, get_controller_settings: Callable[[str], dict[str, bool]] | None = None,
 ) -> dict[str, AbstractControllerWrapper]:
     """Update the controllers list with the new devices."""
     devices = await get_device_ids()
@@ -85,6 +87,8 @@ async def update_controllers_list(
 
                 controller_class = PRODUCT_ID_TO_CONTROLLER_CLASS[dev["product_id"]]
                 controller = controller_class(dev["vendor_id"], dev["product_id"], serial)
+                if get_controller_settings is not None:
+                    controller.configure_motion(**get_controller_settings(serial))
                 await controller.connect()
                 # set to "disconnected" pattern
                 await controller.set_player_led(-1)

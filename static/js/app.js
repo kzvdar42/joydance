@@ -42,6 +42,9 @@ class App extends Component {
         window.mitty.on('req_' + WsCommand.SELECT_SONG, data => this.sendRequest(WsCommand.SELECT_SONG, data))
         window.mitty.on('req_' + WsCommand.RENAME_PLAYER, data => this.sendRequest(WsCommand.RENAME_PLAYER, data))
         window.mitty.on('req_' + WsCommand.TOGGLE_RUMBLE, this.handleToggleRumble)
+        window.mitty.on('req_' + WsCommand.SAVE_CONTROLLER_SETTINGS, data => {
+            if (!this.sendRequest(WsCommand.SAVE_CONTROLLER_SETTINGS, data)) window.mitty.emit('ws_disconnected')
+        })
     }
 
     sendRequest(cmd, data = {}) {

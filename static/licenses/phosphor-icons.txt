@@ -1,7 +1,7 @@
 Phosphor Icons — Regular SVG icons
 https://github.com/phosphor-icons/core
 Source revision: 2b75f3ad12b420c9504ef05df8d2564a28f8500e
-Icons: pencil-simple, trash, broadcast, plus, vibrate, arrows-clockwise, caret-down, x, spinner-gap
+Icons: gear-six, pencil-simple, trash, broadcast, plus, vibrate, arrows-clockwise, caret-down, x, spinner-gap
 Adaptation: vibrate with an added diagonal slash for rumble off.
 
 MIT License

@@ -32,6 +32,7 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
         joycon = controller.joycon
         joycon.set_accel_calibration((0, 0, 0), (16384, 16384, 16384))
         joycon._should_run.set()
+        joycon._imu_enabled = joycon._imu_ready = True
         self.addCleanup(controller.close)
         return controller
 
@@ -49,6 +50,123 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 self.assertEqual(controller.get_accel_events(), expected)
                 self.assertEqual(controller.get_accel_events(), [])
+
+    def test_reader_toggles_imu_and_queues_only_ready_motion(self):
+        controller = self.controller()
+        joycon = controller.joycon
+        joycon._imu_enabled = joycon._imu_ready = False
+        joycon._input_reader_gate.set()
+        idle = b"\x30" + bytes(4) + b"\x04" + bytes(43)
+        partial = motion_report(1)[:37] + bytes(12)
+        fresh = motion_report(4)
+        incoming = iter((idle, idle, partial, fresh, idle))
+
+        def read(**kwargs):
+            report = next(incoming, None)
+            if report is None:
+                joycon._should_run.clear()
+                return b""
+            return report
+
+        commands = []
+        samples = []
+
+        def on_report(device):
+            commands.append(controller.get_latest_command())
+            if len(commands) == 1:
+                controller.set_accel_collection(True)
+            elif device._input_report == fresh:
+                samples.extend(controller.get_accel_events())
+                controller.set_accel_collection(False)
+
+        device = Mock(read=Mock(side_effect=read), write=Mock(side_effect=len))
+        joycon._joycon_device = device
+        joycon.register_update_hook(on_report)
+        with patch("joydance.controllers.joycon.pycon.joycon.time.sleep"):
+            joycon._run_input_reader()
+
+        self.assertEqual(commands[0], Command.ACCEPT)
+        self.assertEqual(len(commands), 5)
+        self.assertEqual(samples, joycon.get_accels(fresh))
+        self.assertEqual(
+            [call.args[0][10:12] for call in device.write.call_args_list],
+            [b"\x40\x01", b"\x41\x03", b"\x40\x00"],
+        )
+
+    def test_idle_shutdown_can_be_disabled_without_buffering_unused_motion(self):
+        controller = self.controller()
+        controller.configure_motion(idle_imu_shutdown=False, gyro_shutdown=False)
+        joycon = controller.joycon
+        joycon._imu_enabled = False
+        joycon._input_reader_gate.set()
+        device = Mock(read=Mock(return_value=motion_report(1)), write=Mock(side_effect=len))
+        joycon._joycon_device = device
+        joycon.register_update_hook(lambda device: device._should_run.clear())
+        with patch("joydance.controllers.joycon.pycon.joycon.time.sleep"):
+            joycon._run_input_reader()
+        self.assertTrue(joycon._imu_enabled)
+        self.assertEqual(controller.get_accel_events(), [])
+        self.assertIsNone(joycon._accel_reports)
+
+    async def test_live_gyro_changes_preserve_motion_and_keep_imu_running(self):
+        controller = self.controller()
+        joycon = controller.joycon
+        controller.set_accel_collection(True)
+        controller.configure_motion(idle_imu_shutdown=False, gyro_shutdown=True)
+        joycon._input_reader_gate.set()
+        reports = (motion_report(1), motion_report(4), motion_report(7))
+        identity = b"\x21" + bytes(12) + b"\xc0\x43\x0f\x01\x69" + bytes(31)
+        device = Mock(read=Mock(side_effect=[reports[0], identity, *reports[1:]]), write=Mock(side_effect=len))
+        joycon._joycon_device = device
+
+        def on_report(device):
+            if device._input_report == reports[1]:
+                controller.configure_motion(idle_imu_shutdown=True, gyro_shutdown=False)
+            elif device._input_report == reports[2]:
+                device._should_run.clear()
+
+        joycon.register_update_hook(on_report)
+        joycon._run_input_reader()
+        expected_samples = [sample for report in reports for sample in joycon.get_accels(report)]
+        self.assertEqual(controller.get_accel_events(), expected_samples)
+        self.assertEqual([request.args[0][10:14] for request in device.write.call_args_list], [
+            b"\x43\x0f\x01\x00", b"\x42\x11\x01\x0c", b"\x42\x11\x01\x5c",
+        ])
+        self.assertTrue(joycon._imu_ready)
+        self.assertTrue(controller.is_connected())
+        await controller.apply_motion_settings(idle_imu_shutdown=True, gyro_shutdown=False)
+
+    def test_live_imu_query_timeout_preserves_scoring_samples(self):
+        controller = self.controller()
+        joycon = controller.joycon
+        controller.set_accel_collection(True)
+        controller.configure_motion(idle_imu_shutdown=True, gyro_shutdown=True)
+        joycon._input_reader_gate.set()
+        joycon._subcommand_resend_interval = 0.025
+        reports = []
+        clock = 0
+
+        def read(**kwargs):
+            nonlocal clock
+            clock += 0.01
+            reports.append(motion_report(len(reports) * 3 + 1))
+            return reports[-1]
+
+        def on_report(device):
+            if len(reports) == 4:
+                device._should_run.clear()
+
+        device = Mock(read=Mock(side_effect=read), write=Mock(side_effect=len))
+        joycon._joycon_device = device
+        joycon.register_update_hook(on_report)
+        with patch("joydance.controllers.joycon.pycon.joycon.time.monotonic", side_effect=lambda: clock):
+            joycon._run_input_reader()
+        self.assertEqual(len(reports), 4)
+        expected_samples = [sample for report in reports for sample in joycon.get_accels(report)]
+        self.assertEqual(controller.get_accel_events(), expected_samples)
+        self.assertFalse(joycon._gyro_shutdown_supported)
+        self.assertTrue(controller.is_connected())
+        self.assertEqual([request.args[0][10] for request in device.write.call_args_list], [0x43])
 
     def test_reader_restores_full_mode_and_recovers_buttons_and_motion(self):
         for product_id in (JOYCON_L_PRODUCT_ID, JOYCON_R_PRODUCT_ID, JOYCON_PRO_PRODUCT_ID):
@@ -100,6 +218,7 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
     def test_mode_restore_retries_are_throttled_and_reset_after_full_reports(self):
         controller = self.controller()
         joycon = controller.joycon
+        joycon._imu_enabled = joycon._imu_ready = False
         joycon._input_reader_gate.set()
         joycon._joycon_device = Mock()
         clock = 0

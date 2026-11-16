@@ -26,6 +26,23 @@ class ConfigLocationTests(unittest.TestCase):
     def seed(self, path, name):
         return ConfigHandler(str(path)).save_connection({**self.entry, "name": name})
 
+    def test_controller_settings_are_validated_saved_and_rolled_back_on_failure(self):
+        config = ConfigHandler(str(self.local))
+        defaults = {"idle_imu_shutdown": True, "gyro_shutdown": False}
+        self.assertEqual(config.get_controller_settings("left"), defaults)
+        settings = {"idle_imu_shutdown": False, "gyro_shutdown": True}
+        config.save_controller_settings("left", settings)
+        reloaded = ConfigHandler(str(self.local))
+        self.assertEqual(reloaded.get_controller_settings("left"), settings)
+        self.assertEqual(reloaded.get_controller_settings("right"), defaults)
+        for invalid in (None, {"gyro_shutdown": True}, {**settings, "gyro_shutdown": "false"},
+                        {**settings, "extra": False}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                config.save_controller_settings("left", invalid)
+        with patch.object(config, "save_data", return_value=False), self.assertRaises(OSError):
+            config.save_controller_settings("left", defaults)
+        self.assertEqual(config.get_controller_settings("left"), settings)
+
     def test_local_file_wins_without_merging_and_changes_survive_restart(self):
         local_entry = self.seed(self.local, "Local")
         self.seed(self.user, "User")

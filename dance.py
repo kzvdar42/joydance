@@ -55,7 +55,9 @@ WEB_PORT = 32623
 
 
 async def update_controllers_info(app):
-    await update_controllers_list(app["controllers"])
+    await update_controllers_list(
+        app["controllers"], get_controller_settings=app["config_handler"].get_controller_settings,
+    )
     controllers_info = []
     for controller in app["controllers"].values():
         try:
@@ -374,6 +376,23 @@ async def toggle_rumble(app, ws, data):
         raise
 
 
+async def save_controller_settings(app, data):
+    if not isinstance(data, dict):
+        raise ValueError("Invalid controller settings.")
+    serial = data.get("controller_serial")
+    if not isinstance(serial, str) or serial not in app["controllers"]:
+        raise ValueError("Unknown controller.")
+    async with app["joydance_connection_locks"][serial]:
+        settings = data.get("settings")
+        app["config_handler"].save_controller_settings(serial, settings)
+        controller = app["controllers"][serial]
+        await controller.apply_motion_settings(**settings)
+        game = app["joydance_connections"].get(serial)
+        state = await game.get_state() if game is not None else await controller.get_state()
+        app["controllers_info"][serial].update(state)
+        await ws_broadcast_response(app, WsCommand.UPDATE_CONTROLLER_STATE, app["controllers_info"][serial])
+
+
 async def websocket_handler(request):
     ws = web.WebSocketResponse()
     try:
@@ -420,13 +439,23 @@ async def websocket_handler(request):
                         await ws_send_response(ws, cmd, {})
                     elif cmd == WsCommand.TOGGLE_RUMBLE:
                         await toggle_rumble(request.app, ws, data)
+                    elif cmd == WsCommand.SAVE_CONTROLLER_SETTINGS:
+                        result = {"controller_serial": data.get("controller_serial")} if isinstance(data, dict) else {}
+                        try:
+                            await save_controller_settings(request.app, data)
+                        except (ValueError, OSError) as error:
+                            result["error"] = str(error)
+                        await ws_send_response(ws, cmd, result)
                     else:
                         logger.warning(f"Unknown command: {cmd}")
                 except Exception as e:
                     logger.error("Error handling command %s: %s", cmd, e, exc_info=True)
                     # Send error response to client
                     try:
-                        await ws_send_response(ws, cmd, {"error": str(e), "status": "error"})
+                        error_response = {"error": str(e), "status": "error"}
+                        if cmd == WsCommand.SAVE_CONTROLLER_SETTINGS and isinstance(data, dict):
+                            error_response["controller_serial"] = data.get("controller_serial")
+                        await ws_send_response(ws, cmd, error_response)
                     except Exception as send_error:
                         logger.error("Failed to send error response: %s", send_error, exc_info=True)
             elif msg.type == WSMsgType.ERROR:
