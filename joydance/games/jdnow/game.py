@@ -30,8 +30,26 @@ def integer(value, minimum, maximum):
     return value
 
 
+def read_move_schedule(data):
+    moves = parse_json(data, jsonp=True)
+    if not isinstance(moves, list) or not 1 <= len(moves) <= 5000:
+        raise ValueError("Invalid JDN move schedule")
+    previous = -1
+    for move in moves:
+        if not isinstance(move, dict) or not isinstance(move.get("name"), str) or not ASSET_NAME.fullmatch(move["name"]):
+            raise ValueError("Invalid JDN move name")
+        previous = integer(move["time"], previous, 3600000)
+        integer(move["duration"], 1, 60000)
+        if "goldMove" in move and (type(move["goldMove"]) not in (bool, int) or move["goldMove"] not in (0, 1)):
+            raise ValueError("Invalid JDN Gold Move flag")
+    names = {move["name"] for move in moves}
+    if len(names) > 500:
+        raise ValueError("Too many JDN classifiers")
+    return moves
+
+
 class JustDanceGameNow(JustDanceGameAbstract):
-    def __init__(self, controller, *args, player_id=None, on_guest=None, scoring_workers=None, **kwargs):
+    def __init__(self, controller, *args, player_id=None, on_guest=None, scoring_workers=None, assets=None, **kwargs):
         self._confirmation_tasks = {}
         super().__init__(controller, *args, **kwargs)
         self._player_id = player_id
@@ -44,6 +62,7 @@ class JustDanceGameNow(JustDanceGameAbstract):
         self._score_lock = asyncio.Lock()
         self._score_pointer = 0.5
         self._scoring_workers = scoring_workers
+        self._assets = assets
 
     def _reset_input_state(self):
         super()._reset_input_state()
@@ -478,26 +497,17 @@ class JustDanceGameNow(JustDanceGameAbstract):
         song = self.catalog[song_id]
         if not ASSET_NAME.fullmatch(song_id):
             raise ValueError("Invalid song identifier")
-        moves = parse_json(await self.api.asset(song, f"moves/{song_id}_moves{coach}.json"), jsonp=True)
-        if not isinstance(moves, list) or not 1 <= len(moves) <= 5000:
-            raise ValueError("Invalid JDN move schedule")
-        previous = -1
-        for move in moves:
-            if not isinstance(move, dict) or not isinstance(move.get("name"), str) or not ASSET_NAME.fullmatch(move["name"]):
-                raise ValueError("Invalid JDN move name")
-            previous = integer(move["time"], previous, 3600000)
-            integer(move["duration"], 1, 60000)
-            if "goldMove" in move and (type(move["goldMove"]) not in (bool, int) or move["goldMove"] not in (0, 1)):
-                raise ValueError("Invalid JDN Gold Move flag")
+        async def asset(path, parse):
+            if self._assets is not None:
+                return await self._assets.get(song, path, parse)
+            return parse(await self.api.asset(song, path))
+        moves = await asset(f"moves/{song_id}_moves{coach}.json", read_move_schedule)
         names = {move["name"] for move in moves}
-        if len(names) > 500:
-            raise ValueError("Too many JDN classifiers")
         slots = asyncio.Semaphore(6)
         async def load(name):
             async with slots:
-                data = await self.api.asset(song, f"classifiers_WIIU/{name}.msm")
                 try:
-                    return name, read_classifier(data)
+                    return name, await asset(f"classifiers_WIIU/{name}.msm", read_classifier)
                 except ValueError as error:
                     logger.warning("%s: JDN classifier=%s rejected: %s", self.controller.serial, name, error)
                     raise

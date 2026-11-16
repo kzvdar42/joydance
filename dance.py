@@ -32,6 +32,7 @@ from joydance.games.factory import create_game
 from joydance.games.jdnow import web as jdnow_web
 from joydance.games.jdnow.game import EMPTY_SONG_SEARCH, JustDanceGameNow
 from joydance.games.jdnow.workers import JDNowScoringWorkers
+from joydance.games.jdnow.assets import JDNowAssets
 from joydance.games.jdnow.signin import run_sign_in_window
 from joydance.games.discovery import discover_consoles
 from joydance.utils.network import normalize_console_url
@@ -154,6 +155,7 @@ async def connect_controller(app, ws, data) -> None:
                 console_options["player_id"] = player_id
                 console_options["on_guest"] = save_jdnow_guest
                 console_options["scoring_workers"] = scoring_workers
+                console_options["assets"] = app.get("jdnow_assets")
 
             game_connection = create_game(
                 controller=controller,
@@ -275,6 +277,10 @@ Running version {JOYDANCE_VERSION}"""
             print(
                 "Error: Unable to fetch the latest release information. Please check the repository URL or your internet connection."
             )
+
+
+async def on_cleanup(app):
+    await app["jdnow_assets"].close()
 
 
 async def html_handler(request):
@@ -540,6 +546,7 @@ if __name__ == "__main__":
         app["jdnow_guest_lock"] = asyncio.Lock()
         app["jdnow_sign_in_lock"] = asyncio.Lock()
         app["jdnow_scoring_workers"] = scoring_workers
+        app["jdnow_assets"] = JDNowAssets()
         app["controllers"] = {}
         app["controllers_info"] = defaultdict(dict)
         app["config_handler"] = ConfigHandler(CONFIG_PATHS)
@@ -548,6 +555,7 @@ if __name__ == "__main__":
         app["saved_cfg_path"] = app["config_handler"].current_cfg_path
 
         app.on_startup.append(on_startup)
+        app.on_cleanup.append(on_cleanup)
         app.add_routes(
             [
                 web.get("/", html_handler),

@@ -16,6 +16,7 @@ from websockets.protocol import State
 from joydance.config_handler import ConfigHandler, is_valid_pairing_code
 from joydance.constants import Command, PairingState
 from joydance.games.jdnow.api import JDNowAPI, parse_json, read_limited, service_url
+from joydance.games.jdnow.assets import JDNowAssets
 from joydance.games.jdnow.connection import JDNowConnection, decode_payload, encode_frame
 from joydance.games.jdnow.dictionary import DICTIONARY
 from joydance.games.jdnow.scoring import float32, ratio_score, read_classifier, resample, score_adaptive_move, score_move
@@ -931,10 +932,11 @@ class JDNowGameTests(unittest.IsolatedAsyncioTestCase):
             original_key = guest_state(config, "test-jdn")["jdnow_guest"]
             controller = game().controller
             scoring_workers = Mock(spec=JDNowScoringWorkers)
+            assets = Mock(spec=JDNowAssets)
             app = {"config_handler": config, "controllers": {controller.serial: controller},
                    "controllers_info": {controller.serial: {}}, "joydance_connections": {}, "websockets": set(),
                    "joydance_connection_locks": {controller.serial: asyncio.Lock()}, "jdnow_guest_lock": asyncio.Lock(),
-                   "jdnow_scoring_workers": scoring_workers}
+                   "jdnow_scoring_workers": scoring_workers, "jdnow_assets": assets}
             data = {"controller_serial": controller.serial, "pairing_method": "jdnow", "pairing_code": "22965",
                     "host_ip_addr": "", "console_ip_addr": ""}
             with patch.object(JustDanceGameNow, "start_pair", new=AsyncMock(return_value=Mock())):
@@ -944,6 +946,7 @@ class JDNowGameTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(connection._player_id, original)
                 self.assertIsNone(connection.console_ip_addr)
                 self.assertIs(connection._scoring_workers, scoring_workers)
+                self.assertIs(connection._assets, assets)
                 await dance.connect_controller(app, Mock(), {**data, "jdnow_guest": "new"})
                 new_connection = app["joydance_connections"][controller.serial]
                 self.assertIsNone(new_connection._player_id)
@@ -1393,6 +1396,40 @@ class JDNowGameTests(unittest.IsolatedAsyncioTestCase):
         scorer.assert_called_once()
         messages = [json.loads(call.args[0])["func"] for call in instance.ws.send.await_args_list]
         self.assertEqual(messages, ["playerScoredPhone"])
+
+    async def test_six_controllers_share_song_preparation_without_changing_scoring(self):
+        song = {"base": "https://cdn.justdancenow.com/TestSong-v1"}
+        moves = [{"name": "move", "time": 0, "duration": 841}]
+
+        async def download(song, path):
+            return classifier_bytes() if path.endswith(".msm") else json.dumps(moves).encode()
+
+        baseline = game()
+        baseline.catalog = {"TestSong": song}
+        baseline.api.asset = AsyncMock(side_effect=download)
+        expected_moves, expected_classifiers = await baseline._load_song("TestSong", 0)
+        motion = [(t, math.sin(t / 100), -1, math.cos(t / 75)) for t in range(0, 960, 5)]
+        expected_score = score_adaptive_move(expected_classifiers["move"], motion, 0, 841, .5)
+        assets = JDNowAssets()
+        self.addAsyncCleanup(assets.close)
+        instances = [game() for _ in range(6)]
+        for instance in instances:
+            instance._assets = assets
+            instance.catalog = {"TestSong": song}
+        with patch.object(JDNowAPI, "asset", new=AsyncMock(side_effect=download)) as fetch, \
+                patch("joydance.games.jdnow.game.read_classifier", wraps=read_classifier) as parse:
+            results = await asyncio.gather(*(instance._load_song("TestSong", 0) for instance in instances))
+            self.assertEqual(fetch.await_count, 2)
+            parse.assert_called_once()
+            # Another coach has a distinct schedule but shares the same classifier file.
+            await instances[0]._load_song("TestSong", 1)
+            self.assertEqual(fetch.await_count, 3)
+            parse.assert_called_once()
+        for actual_moves, classifiers in results:
+            self.assertEqual(actual_moves, expected_moves)
+            self.assertEqual(classifiers, expected_classifiers)
+            self.assertIs(classifiers["move"], results[0][1]["move"])
+            self.assertEqual(score_adaptive_move(classifiers["move"], motion, 0, 841, .5), expected_score)
 
     async def test_public_move_schedules_accept_integer_gold_flags(self):
         instance = game()
