@@ -260,11 +260,11 @@ Running version {JOYDANCE_VERSION}"""
                         )
                     )
                 return True
-        except:
+        except Exception:
             return False
 
     # Firstly check releases page, then page with tags
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
         if await get_latest_tag_from_api_and_compare(
             "https://api.github.com/repos/kzvdar42/joydance/releases/latest"
         ):
