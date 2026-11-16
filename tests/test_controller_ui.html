@@ -283,6 +283,38 @@ try {
     render(null, document.body);
     check(listeners(updateEvent) === 0 && listeners('ws_disconnected') === beforeUnmount - controllers.length - 1,
         'Unmount must release row settings and refresh listeners');
+    const originalFetch = window.fetch;
+    let finishSignIn;
+    try {
+        window.fetch = (url, options) => {
+            check(url === '/jdnow/sign-in' && options.method === 'POST', 'Sign-in must use the existing endpoint');
+            return new Promise(resolve => { finishSignIn = resolve; });
+        };
+        const guestController = {...controllers[0], jdnow_guest:'saved',
+            jdnow_guests:[{key:'saved',name:'Saved dancer',controllers:['left']}]};
+        render(html`<${Controllers} controllers=${[guestController]} jdnow=${true} />`, document.body);
+        await settle();
+        const picker = document.querySelector('.controller-tools select');
+        check([...picker.options].some(option => option.value === 'sign-in' && option.textContent === 'Sign in with Ubisoft…'),
+            'The JDNow guest picker must include the Ubisoft sign-in option');
+        check(![...document.querySelectorAll('button')].some(button => button.textContent.includes('Sign in with Ubisoft')),
+            'The separate sign-in button must be removed');
+        for (const ok of [true, false]) {
+            picker.value = 'sign-in';
+            picker.dispatchEvent(new Event('change', {bubbles:true}));
+            await settle();
+            check(picker.disabled && picker.value === 'saved' && picker.getAttribute('aria-busy') === 'true',
+                'Sign-in must preserve the chosen guest and disable the picker while pending');
+            finishSignIn({ok,json:async () => ok ? {} : {error:'Test sign-in failure'}});
+            await settle();
+            check(!picker.disabled && picker.value === 'saved', 'Finishing sign-in must restore the chosen guest');
+            check(document.body.textContent.includes(ok ? 'Profile imported.' : 'Test sign-in failure'),
+                'Sign-in feedback must remain visible below the picker');
+        }
+    } finally {
+        window.fetch = originalFetch;
+        render(null, document.body);
+    }
     render(html`<div class="container controllers"><${Controllers} controllers=${controllers} /></div><p style="text-align:center">All UI regression checks passed.</p>`, document.body);
     await settle();
     document.body.dataset.testResult = 'passed';

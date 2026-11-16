@@ -53,7 +53,6 @@ class Controller extends Component {
 
         this.connect = this.connect.bind(this)
         this.disconnect = this.disconnect.bind(this)
-        this.signIn = this.signIn.bind(this)
         this.onStateUpdated = this.onStateUpdated.bind(this)
         this.onPlayerRenamed = this.onPlayerRenamed.bind(this)
         this.toggleRumble = this.toggleRumble.bind(this)
@@ -306,21 +305,26 @@ class Controller extends Component {
                 `}
                 ${props.jdnow && !connection_requested && controllerState !== PairingState.CONNECTED && html`
                     <div class="pure-form controller-tools">
-                        <label>JDNow guest
-                            <select value=${this.selectedGuest()} onChange=${event => this.setState({guestChoice: event.target.value})}>
+                        <label>JDNow profile
+                            <select value=${this.selectedGuest()} disabled=${signingIn} aria-busy=${signingIn}
+                                onChange=${event => {
+                                    if (event.target.value === 'sign-in') {
+                                        event.target.value = this.selectedGuest()
+                                        return this.signIn()
+                                    }
+                                    this.setState({guestChoice: event.target.value})
+                                }}>
                                 ${(controller.jdnow_guests || []).map(guest => {
                                     const others = guest.controllers.filter(serial => serial !== controller.serial)
                                     const label = others.length ? `${guest.name} · Saved for ${others.join(', ')}` : guest.name
                                     return html`<option value=${guest.key}>${label}</option>`
                                 })}
                                 <option value="new">New guest</option>
+                                ${['localhost', '127.0.0.1'].includes(window.location.hostname) && html`
+                                    <option value="sign-in">Sign in with Ubisoft…</option>
+                                `}
                             </select>
                         </label>
-                        ${['localhost', '127.0.0.1'].includes(window.location.hostname) && html`
-                            <button type="button" class="pure-button" disabled=${signingIn} onClick=${this.signIn}>
-                                Sign in with Ubisoft
-                            </button>
-                        `}
                     </div>
                     ${signingIn && html`<p class="controller-field-status" role="status">Finish signing in in the Ubisoft window.</p>`}
                     ${signInFeedback && html`

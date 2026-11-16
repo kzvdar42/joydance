@@ -201,7 +201,7 @@ guestCard.setState = update => Object.assign(guestCard.state, update);
 const guestPicker = nodes(guestCard.render(guestCard.props, guestCard.state)).find(node => node?.type === 'select');
 assert.equal(guestPicker.props.value, 'fresh-key');
 assert.deepEqual(nodes(guestPicker).filter(node => node?.type === 'option').map(node => node.props.children),
-    ['Guest 1 · Original · Saved for unplugged-controller', 'Guest 2 · Fresh', 'New guest']);
+    ['Guest 1 · Original · Saved for unplugged-controller', 'Guest 2 · Fresh', 'New guest', 'Sign in with Ubisoft…']);
 emitted.length = 0;
 for (const value of ['new', 'original-key']) {
     guestPicker.props.onChange({target:{value}});
@@ -217,19 +217,31 @@ const availablePicker = nodes(guestCard.render(guestCard.props, guestCard.state)
 assert.equal(availablePicker.props.value, 'fresh-key');
 assert(!nodes(availablePicker).some(node => node?.props?.value === 'original-key'));
 assert(!nodes(guestCard.render({...guestCard.props, jdnow:false}, guestCard.state)).some(node => node?.type === 'select'));
-const signInButton = () => nodes(guestCard.render(guestCard.props, guestCard.state))
-    .find(node => node?.type === 'button' && node.props.children === 'Sign in with Ubisoft');
+const currentGuestPicker = () => nodes(guestCard.render(guestCard.props, guestCard.state)).find(node => node?.type === 'select');
+const signInOption = () => nodes(currentGuestPicker()).find(node => node?.type === 'option' && node.props.value === 'sign-in');
 context.fetch = async (url, options) => {
     assert.equal(url, '/jdnow/sign-in');
     assert.equal(options.method, 'POST');
     return {ok:true, json:async () => ({})};
 };
-const signIn = signInButton().props.onClick();
-assert(signInButton().props.disabled);
+const signInTarget = {value:'sign-in'};
+const signIn = currentGuestPicker().props.onChange({target:signInTarget});
+assert.equal(signInTarget.value, 'fresh-key');
+assert.equal(guestCard.selectedGuest(), 'fresh-key');
+assert(currentGuestPicker().props.disabled);
+assert(currentGuestPicker().props['aria-busy']);
+assert(!nodes(guestCard.render(guestCard.props, guestCard.state)).some(node => node?.type === 'button' && node.props.children === 'Sign in with Ubisoft'));
 await signIn;
 assert.match(guestCard.state.signInFeedback.text, /Profile imported/);
+assert(!currentGuestPicker().props.disabled);
+context.fetch = async () => ({ok:false,json:async () => ({error:'Test sign-in failure'})});
+await currentGuestPicker().props.onChange({target:{value:'sign-in'}});
+assert.equal(guestCard.state.signInFeedback.error, true);
+assert.equal(guestCard.state.signInFeedback.text, 'Test sign-in failure');
+assert.equal(currentGuestPicker().props.value, 'fresh-key');
+assert(!currentGuestPicker().props.disabled);
 context.window.location.hostname = '192.168.1.2';
-assert.equal(signInButton(), undefined);
+assert.equal(signInOption(), undefined);
 context.window.location.hostname = 'localhost';
 guestCard.state.controller = {...guestData, state:4};
 assert(!nodes(guestCard.render(guestCard.props, guestCard.state)).some(node => node?.type === 'select'));
