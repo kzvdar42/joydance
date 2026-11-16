@@ -236,11 +236,11 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
     async def sleep_approx(self, target_duration):
         tmp_duration = target_duration
         x = 0.3
-        start = time.time()
+        start = time.monotonic()
         while True:
             tmp_duration = tmp_duration * x
             await asyncio.sleep(tmp_duration)
-            dt = time.time() - start
+            dt = time.monotonic() - start
             if dt >= target_duration:
                 break
             tmp_duration = target_duration - dt
@@ -276,7 +276,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 frames = 0
                 await asyncio.sleep(sleep_duration)
                 continue
-            last_time = time.time()
+            last_time = time.monotonic()
             frames = frames + 1 if frames < 3 else 1
             # Collecting and sending accelerometer data
             await asyncio.gather(
@@ -284,7 +284,7 @@ class JustDanceGameAbstract(AbstractGameWrapper, ABC):
                 self.collect_accelerometer_data(),
             )
             await self.send_accelerometer_data(frames)
-            dt = time.time() - last_time
+            dt = time.monotonic() - last_time
             sleep_duration = max(0, FRAME_DURATION - (dt - sleep_duration))
 
     async def send_hello(self):
