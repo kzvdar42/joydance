@@ -71,10 +71,6 @@ class AbstractControllerWrapper(ABC):
         """Drain new accelerometer samples in arrival order as (x, y, z) tuples."""
         raise NotImplementedError
 
-    def get_joystick_status(self):
-        """Return joystick status - dict with analog stick positions."""
-        raise NotImplementedError
-
     def get_joystick_command(self):
         """Return joystick command - Parsed status as a Command value."""
         raise NotImplementedError

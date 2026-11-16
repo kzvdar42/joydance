@@ -3,6 +3,7 @@ import { html } from '/js/utils.js';
 import { WsCommand } from '/js/consts.js';
 import ControllerIcon from '/js/components/ControllerIcon.js';
 import ActionIcon from '/js/components/ActionIcon.js';
+import ControllerSettings from '/js/components/ControllerSettings.js';
 
 const SVG_BATTERY_LEVEL = html`<svg style="enable-background:new 0 0 16 16" viewBox="0 0 16 16" xml:space="preserve" xmlns="http://www.w3.org/2000/svg"><path d="M15 4H0v8h15V9h1V7h-1V4zm-1 3v4H1V5h13v2z"/><rect class="battery-bar-4" height="4" width="2" x="11" y="6"/><rect class="battery-bar-3" height="4" width="2" x="8" y="6"/><rect class="battery-bar-2" height="4" width="2" x="5" y="6"/><rect class="battery-bar-1" height="4" width="2" x="2" y="6"/></svg>`
 
@@ -56,8 +57,6 @@ class Controller extends Component {
         this.onStateUpdated = this.onStateUpdated.bind(this)
         this.onPlayerRenamed = this.onPlayerRenamed.bind(this)
         this.toggleRumble = this.toggleRumble.bind(this)
-        this.onSettingsSaved = this.onSettingsSaved.bind(this)
-        this.onSettingsDisconnected = this.onSettingsDisconnected.bind(this)
 
         this.state = {
             controller: props.controller,
@@ -67,17 +66,12 @@ class Controller extends Component {
             showSongResults: false,
             signingIn: false,
             signInFeedback: null,
-            motionSettings: null,
-            savingSettings: false,
-            settingsFeedback: null,
         }
     }
 
     componentDidMount() {
         window.mitty.on('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
         window.mitty.on('resp_' + WsCommand.RENAME_PLAYER, this.onPlayerRenamed)
-        window.mitty.on('resp_' + WsCommand.SAVE_CONTROLLER_SETTINGS, this.onSettingsSaved)
-        window.mitty.on('ws_disconnected', this.onSettingsDisconnected)
     }
 
     componentDidUpdate(prevProps) {
@@ -89,8 +83,6 @@ class Controller extends Component {
     componentWillUnmount() {
         window.mitty.off('resp_' + WsCommand.UPDATE_CONTROLLER_STATE, this.onStateUpdated)
         window.mitty.off('resp_' + WsCommand.RENAME_PLAYER, this.onPlayerRenamed)
-        window.mitty.off('resp_' + WsCommand.SAVE_CONTROLLER_SETTINGS, this.onSettingsSaved)
-        window.mitty.off('ws_disconnected', this.onSettingsDisconnected)
     }
 
     selectedGuest() {
@@ -154,20 +146,7 @@ class Controller extends Component {
         }
     }
 
-    onSettingsSaved({controller_serial, error}) {
-        if (controller_serial !== this.props.controller.serial) return
-        this.setState({savingSettings: false, settingsFeedback: error || 'Settings saved.',
-            ...(error ? {} : {motionSettings: null})})
-    }
-
-    onSettingsDisconnected() {
-        if (this.state.savingSettings) {
-            this.setState({savingSettings: false, settingsFeedback: 'Connection lost. Refresh to check saved settings.'})
-        }
-    }
-
-    render(props, { controller, playerName, songQuery, showSongResults, signingIn, signInFeedback,
-        motionSettings, savingSettings, settingsFeedback }) {
+    render(props, { controller, playerName, songQuery, showSongResults, signingIn, signInFeedback }) {
         const { name, state, connection_requested, pairing_code, battery_level, rumble_enabled, player_name, player_id, player_color, player_image, skin_image, additional_message, is_main_player, error_details } = controller
         const controllerState = state
         const stateMessage = controllerState >= PairingState.ERROR_CONTROLLER && error_details
@@ -236,72 +215,13 @@ class Controller extends Component {
                             ${controller.motion_settings && html`
                                 <button type="button" class="pure-button icon-button controller-settings-button" aria-haspopup="dialog"
                                     aria-label=${`${name} settings`} title="Settings"
-                                    onClick=${() => this.settingsDialog.showModal()}><${ActionIcon} name="settings" /></button>
+                                    onClick=${() => this.settings.open()}><${ActionIcon} name="settings" /></button>
                             `}
                         </div>
                     </div>
                 </div>
                 ${controller.motion_settings && html`
-                    <dialog class="controller-settings" aria-labelledby=${`controller-settings-${controller.serial}`}
-                        ref=${element => this.settingsDialog = element}>
-                        <div class="controller-settings-heading">
-                            <h3 id=${`controller-settings-${controller.serial}`}>${name} settings</h3>
-                            <button type="button" class="pure-button icon-button" aria-label=${`Close ${name} settings`}
-                                title="Close" onClick=${() => this.settingsDialog.close()}><${ActionIcon} name="close" /></button>
-                        </div>
-                        <form class="pure-form" onSubmit=${event => {
-                            event.preventDefault()
-                            if (savingSettings) return
-                            this.setState({savingSettings: true, settingsFeedback: null})
-                            window.mitty.emit('req_' + WsCommand.SAVE_CONTROLLER_SETTINGS, {
-                                controller_serial: controller.serial,
-                                settings: motionSettings || controller.motion_settings,
-                            })
-                        }}>
-                            <fieldset disabled=${savingSettings}>
-                                <label class="pure-checkbox">
-                                    <input type="checkbox" name="idle_imu_shutdown"
-                                        aria-labelledby=${`idle-power-title-${controller.serial}`}
-                                        aria-describedby=${`idle-power-description-${controller.serial}`}
-                                        checked=${(motionSettings || controller.motion_settings).idle_imu_shutdown}
-                                        onChange=${event => this.setState({motionSettings: {
-                                            ...(motionSettings || controller.motion_settings), idle_imu_shutdown: event.target.checked,
-                                        }, settingsFeedback: null})} />
-                                    <span>
-                                        <span class="controller-setting-title" id=${`idle-power-title-${controller.serial}`}>
-                                            Automatic sensor sleep <span class="controller-setting-alpha" role="img" aria-label="Experimental" title="Experimental">α</span>
-                                        </span>
-                                        <span class="controller-setting-description" id=${`idle-power-description-${controller.serial}`}>
-                                            Motion sensors wake up only during dance scoring
-                                        </span>
-                                    </span>
-                                </label>
-                                <label class="pure-checkbox">
-                                    <input type="checkbox" name="gyro_shutdown"
-                                        aria-labelledby=${`song-power-title-${controller.serial}`}
-                                        aria-describedby=${`song-power-description-${controller.serial}`}
-                                        checked=${(motionSettings || controller.motion_settings).gyro_shutdown}
-                                        onChange=${event => this.setState({motionSettings: {
-                                            ...(motionSettings || controller.motion_settings), gyro_shutdown: event.target.checked,
-                                        }, settingsFeedback: null})} />
-                                    <span>
-                                        <span class="controller-setting-title" id=${`song-power-title-${controller.serial}`}>
-                                            Accelerometer only <span class="controller-setting-alpha" role="img" aria-label="Experimental" title="Experimental">α</span>
-                                        </span>
-                                        <span class="controller-setting-description" id=${`song-power-description-${controller.serial}`}>
-                                            Turn off gyroscope (it's not used during scoring) to save power
-                                        </span>
-                                    </span>
-                                </label>
-                                <div class="controller-settings-actions">
-                                    <button type="submit" class="pure-button pure-button-primary" disabled=${!motionSettings}>${savingSettings ? 'Saving…' : 'Save changes'}</button>
-                                </div>
-                            </fieldset>
-                        </form>
-                        ${controller.motion_settings.gyro_shutdown && !controller.gyro_shutdown_available
-                            ? html`<p class="controller-field-status">Power saving during songs could not be enabled on this controller.</p>` : null}
-                        ${settingsFeedback && html`<p class="controller-field-status" role="status">${settingsFeedback}</p>`}
-                    </dialog>
+                    <${ControllerSettings} controller=${controller} ref=${settings => this.settings = settings} />
                 `}
                 ${props.jdnow && !connection_requested && controllerState !== PairingState.CONNECTED && html`
                     <div class="pure-form controller-tools">

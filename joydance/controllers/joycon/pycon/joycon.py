@@ -934,6 +934,26 @@ class JoyCon:
             return False
         return bool(ack and reply.startswith(b'\xc0\x43\x0f\x01\x69'))
 
+    def get_motion_settings(self):
+        return {"idle_imu_shutdown": self._idle_imu_shutdown, "gyro_shutdown": self._gyro_shutdown}
+
+    def configure_motion(self, *, idle_imu_shutdown, gyro_shutdown):
+        self._idle_imu_shutdown = idle_imu_shutdown
+        self._gyro_shutdown = gyro_shutdown
+
+    @property
+    def gyro_shutdown_available(self):
+        return self._gyro_shutdown_supported
+
+    @property
+    def _needs_motion(self):
+        return self._accel_reports is not None or not self._idle_imu_shutdown
+
+    @property
+    def motion_settings_applied(self):
+        return (self._gyro_shutdown_checked == self._gyro_shutdown
+                and self._imu_enabled == self._needs_motion)
+
     def _apply_pending_motion_settings(self):
         gyro_shutdown = self._gyro_shutdown
         if gyro_shutdown != self._gyro_shutdown_checked:
@@ -944,7 +964,7 @@ class JoyCon:
                 )
             self._gyro_shutdown_supported = supported
             self._gyro_shutdown_checked = gyro_shutdown
-        needs_motion = self._accel_reports is not None or not self._idle_imu_shutdown
+        needs_motion = self._needs_motion
         if needs_motion != self._imu_enabled:
             self._set_imu_enabled(needs_motion)
 
@@ -965,7 +985,7 @@ class JoyCon:
 
     def _setup_sensors(self):
         logger.debug("%s: _setup_sensors", self.serial)
-        self._set_imu_enabled(self._accel_reports is not None or not self._idle_imu_shutdown)
+        self._set_imu_enabled(self._needs_motion)
         time.sleep(0.02)
         self._write_output_report(b'\x01', b'\x48', b'\x01')
         time.sleep(0.02)

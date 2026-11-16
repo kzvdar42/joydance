@@ -55,6 +55,7 @@ const checkActionsLayout = row => {
 };
 const refresh = () => document.querySelector('.btn-refresh');
 const updateEvent = 'resp_' + WsCommand.UPDATE_CONTROLLER_STATE;
+const settingsEvent = 'resp_' + WsCommand.SAVE_CONTROLLER_SETTINGS;
 const listeners = event => window.mitty.all.get(event)?.length || 0;
 const reply = list => window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_' + WsCommand.GET_CONTROLLER_LIST,data:list})});
 
@@ -64,6 +65,7 @@ try {
     reply(controllers);
     await settle();
     check(listeners(updateEvent) === 3, 'Each row must have one state listener');
+    check(listeners(settingsEvent) === 3, 'Each settings popup must have one save listener');
     check(refresh().querySelector('svg[aria-hidden="true"]') && refresh().getAttribute('aria-label') === 'Refresh controllers',
         'Refresh icon must retain its accessible action name');
     const settingsRow = document.querySelector('[aria-label="Joy-Con left"]').closest('li');
@@ -107,6 +109,10 @@ try {
     await settle();
     check(sent.at(-1).cmd === WsCommand.SAVE_CONTROLLER_SETTINGS && sent.at(-1).data.settings.gyro_shutdown,
         'Settings form must send the selected controller and checkbox values');
+    window.mitty.emit(settingsEvent, {controller_serial:'right'});
+    await settle();
+    check(settingsPanel.querySelector('fieldset').disabled,
+        'Another controller save reply must not finish this controller save');
     window.testSocket.onmessage({data:JSON.stringify({cmd:'resp_save_controller_settings',
         data:{controller_serial:'left',error:'Test save error'}})});
     await settle();
@@ -128,6 +134,18 @@ try {
     const escape = new Event('cancel', {cancelable:true});
     if (settingsPanel.dispatchEvent(escape)) settingsPanel.close();
     check(!settingsPanel.open, 'Settings must allow the native Escape action');
+    settingsButton.click();
+    settingsPanel.querySelector('[name="idle_imu_shutdown"]').click();
+    await settle();
+    settingsPanel.querySelector('form').requestSubmit();
+    await settle();
+    window.mitty.emit('ws_disconnected');
+    await settle();
+    check(!settingsPanel.querySelector('fieldset').disabled &&
+        settingsPanel.textContent.includes('Connection lost. Refresh to check saved settings.') &&
+        !settingsPanel.querySelector('[name="idle_imu_shutdown"]').checked,
+        'Disconnection must release a pending save and preserve its draft settings');
+    settingsPanel.querySelector('.controller-settings-heading button').click();
     reply(controllers);
     await settle();
     for (const player_color of [undefined, null, []]) {
@@ -212,9 +230,11 @@ try {
         reply(controllers);
         await settle();
         check(listeners(updateEvent) === 3, 'Remounted rows must not accumulate listeners');
+        check(listeners(settingsEvent) === 3, 'Remounted settings must not accumulate save listeners');
         reply([]);
         await settle();
         check(listeners(updateEvent) === 0, 'Removed rows must release listeners');
+        check(listeners(settingsEvent) === 0, 'Removed settings must release save listeners');
     }
     reply(controllers);
     await settle();

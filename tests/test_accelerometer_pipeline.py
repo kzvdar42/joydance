@@ -93,6 +93,31 @@ class AccelerometerPipelineTests(unittest.IsolatedAsyncioTestCase):
             [b"\x40\x01", b"\x41\x03", b"\x40\x00"],
         )
 
+    def test_motion_settings_state_tracks_requested_and_applied_settings(self):
+        joycon = self.controller().joycon
+        settings = {"idle_imu_shutdown": True, "gyro_shutdown": False}
+        self.assertEqual(joycon.get_motion_settings(), settings)
+        snapshot = joycon.get_motion_settings()
+        snapshot["idle_imu_shutdown"] = False
+        self.assertEqual(joycon.get_motion_settings(), settings)
+
+        joycon._imu_enabled = False
+        self.assertTrue(joycon.motion_settings_applied)
+        joycon.set_accel_collection(True)
+        self.assertFalse(joycon.motion_settings_applied)
+        joycon._imu_enabled = True
+        self.assertTrue(joycon.motion_settings_applied)
+        joycon.set_accel_collection(False)
+        self.assertFalse(joycon.motion_settings_applied)
+        joycon.configure_motion(idle_imu_shutdown=False, gyro_shutdown=True)
+        self.assertEqual(joycon.get_motion_settings(), {"idle_imu_shutdown": False, "gyro_shutdown": True})
+        self.assertFalse(joycon.motion_settings_applied)
+        joycon._gyro_shutdown_checked = True
+        self.assertTrue(joycon.motion_settings_applied)
+        self.assertFalse(joycon.gyro_shutdown_available)
+        joycon._gyro_shutdown_supported = True
+        self.assertTrue(joycon.gyro_shutdown_available)
+
     def test_idle_shutdown_can_be_disabled_without_buffering_unused_motion(self):
         controller = self.controller()
         controller.configure_motion(idle_imu_shutdown=False, gyro_shutdown=False)
