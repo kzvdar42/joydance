@@ -102,10 +102,12 @@ class ProControllerTests(unittest.TestCase):
         sticks = self.joycon.get_status()["analog-sticks"]
         self.assertEqual(sticks["left"], {"horizontal": 0, "vertical": 0})
         self.assertAlmostEqual(sticks["right"]["vertical"], -0.9)
-        self.assertEqual(self.controller.get_joystick_command(), Command.DOWN)
-        report[6:9] = pack_axes(2800, 2100)
-        self.assertAlmostEqual(self.joycon.get_stick_left_horizontal(), 0.8)
-        self.assertEqual(self.controller.get_joystick_command(), Command.RIGHT)
+        with patch.object(self.joycon, "get_accels") as get_accels:
+            self.assertEqual(self.controller.get_joystick_command(), Command.DOWN)
+            report[6:9] = pack_axes(2800, 2100)
+            self.assertAlmostEqual(self.joycon.get_stick_left_horizontal(), 0.8)
+            self.assertEqual(self.controller.get_joystick_command(), Command.RIGHT)
+            get_accels.assert_not_called()
 
     def test_user_and_factory_calibration_are_read_for_each_pro_stick(self):
         values = {

@@ -130,24 +130,20 @@ class JoyConWrapper(AbstractControllerWrapper):
 
     def get_joystick_command(self):
         try:
-            controller_status = self.get_joystick_status()
-            if controller_status and "analog-sticks" in controller_status:
-                if self.is_pro():
-                    stick_sides = ("left", "right")
-                else:
-                    stick_sides = ("left",) if self.is_left() else ("right",)
-                for stick_side in stick_sides:
-                    stick = controller_status["analog-sticks"].get(stick_side, {})
-                    vertical = stick.get("vertical", 0)
-                    horizontal = stick.get("horizontal", 0)
-                    if vertical < -0.5:
-                        return Command.DOWN
-                    elif vertical > 0.5:
-                        return Command.UP
-                    elif horizontal < -0.5:
-                        return Command.LEFT
-                    elif horizontal > 0.5:
-                        return Command.RIGHT
+            if self.is_pro():
+                sticks = (self.joycon.stick_l, self.joycon.stick_r)
+            else:
+                stick = self.joycon.stick_l if self.is_left() else self.joycon.stick_r
+                sticks = (stick,)
+            for horizontal, vertical in sticks:
+                if vertical < -0.5:
+                    return Command.DOWN
+                if vertical > 0.5:
+                    return Command.UP
+                if horizontal < -0.5:
+                    return Command.LEFT
+                if horizontal > 0.5:
+                    return Command.RIGHT
         except OSError:
             logger.exception("Error reading joystick status from JoyCon.")
             return None
